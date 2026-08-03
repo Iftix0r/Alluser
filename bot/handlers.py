@@ -20,8 +20,8 @@ WELCOME = (
     "Salom! Bu bot orqali siz o'z Telegram akkauntingizni ulab, guruhlardagi "
     "xabarlarni kalit so'zlar bo'yicha kuzatib, mos xabarlarni buyurtmalar "
     "guruhingizga avtomatik yuborishingiz mumkin.\n\n"
-    "Boshlash uchun telefon raqamingizni xalqaro formatda yuboring "
-    "(masalan: +998901234567):"
+    "Boshlash uchun pastdagi \"📱 Telefon raqamni yuborish\" tugmasini bosing "
+    "yoki raqamingizni xalqaro formatda qo'lda yozing (masalan: +998901234567):"
 )
 
 HELP = (
@@ -317,9 +317,17 @@ def register_handlers(bot_client: TelegramClient, manager) -> None:
 async def run_login_flow(bot_client: TelegramClient, manager, chat_id: int, tg_user_id: int) -> None:
     try:
         async with bot_client.conversation(chat_id, timeout=300) as conv:
-            await conv.send_message(WELCOME)
+            await conv.send_message(
+                WELCOME,
+                buttons=[[Button.request_phone("📱 Telefon raqamni yuborish")]],
+            )
             phone_msg = await conv.get_response()
-            phone = phone_msg.raw_text.strip()
+            if phone_msg.contact:
+                phone = phone_msg.contact.phone_number.strip()
+                if not phone.startswith("+"):
+                    phone = "+" + phone
+            else:
+                phone = phone_msg.raw_text.strip()
 
             user_client = TelegramClient(StringSession(), API_ID, API_HASH)
             await user_client.connect()
@@ -327,11 +335,11 @@ async def run_login_flow(bot_client: TelegramClient, manager, chat_id: int, tg_u
             try:
                 sent = await user_client.send_code_request(phone)
             except PhoneNumberInvalidError:
-                await conv.send_message("Telefon raqam noto'g'ri. Qaytadan /start bosing.")
+                await conv.send_message("Telefon raqam noto'g'ri. Qaytadan /start bosing.", buttons=Button.clear())
                 await user_client.disconnect()
                 return
 
-            await conv.send_message("Telegram sizga kod yubordi. Kodni kiriting:")
+            await conv.send_message("Telegram sizga kod yubordi. Kodni kiriting:", buttons=Button.clear())
             code_msg = await conv.get_response()
             code = code_msg.raw_text.strip()
 
