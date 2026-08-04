@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=if
-WorkingDirectory=/home/if/Documents/Github/Aluser
-ExecStart=/home/if/Documents/Github/Aluser/start.sh
+User=root
+WorkingDirectory=/root/2/2/Alluser
+ExecStart=/root/2/2/Alluser/start.sh
 Restart=always
 RestartSec=5
 
