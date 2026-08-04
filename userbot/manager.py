@@ -253,23 +253,23 @@ class UserbotManager:
             f"🔗 Username: {html.escape(username)}",
             "",
             f"📞 Telefon: {html.escape(phone)}",
-            "",
-            f"📍 Guruh: {html.escape(chat_title)}",
-            "",
-            f"💬 Xabar:\n<b><i>{html.escape(text)}</i></b>",
         ]
+        if not chat_username:
+            message_lines += ["", f"📍 Guruh: {html.escape(chat_title)}"]
+        message_lines += ["", f"💬 Xabar:\n<b><i>{html.escape(text)}</i></b>"]
         order_text = "\n".join(message_lines)
 
+        group_row = []
+        if chat_username:
+            group_row.append(Button.url(f"📍 {chat_title}", f"https://t.me/{chat_username}"))
         link_row = []
         if chat_username:
             link_row.append(Button.url("🔗 Xabarga o'tish", f"https://t.me/{chat_username}/{message.id}"))
         link_row.append(Button.url("👤 Profil", f"tg://user?id={sender.id}"))
         buttons = [
+            *([group_row] if group_row else []),
             link_row,
-            [
-                Button.inline("✅ Men oldim", b"order_claim"),
-                Button.inline("🚫 Bloklash", f"block:{sender.id}:{current.id}".encode()),
-            ],
+            [Button.inline("🚫 Bloklash", f"block:{sender.id}:{current.id}".encode())],
         ]
 
         try:
