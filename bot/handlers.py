@@ -114,10 +114,14 @@ def summarize_remove_results(results: dict[str, bool]) -> str:
 
 def main_menu(user) -> list:
     active_label = "⏸ Pauza qilish" if user.is_active else "▶️ Davom ettirish"
+    unmatched_label = (
+        "🧭 Aniqlanmagan: yo'lovchi ✅" if user.assume_passenger_if_unmatched else "🧭 Aniqlanmagan: yo'lovchi ❌"
+    )
     return [
         [Button.inline("🔑 Kalit so'zlar", b"kw_menu"), Button.inline("🚖 Haydovchi so'zlari", b"dkw_menu")],
         [Button.inline("📦 Buyurtma guruhi", b"group_menu"), Button.inline("🗂 Kuzatiladigan guruhlar", b"groups_menu")],
         [Button.inline("📊 Holat", b"status"), Button.inline(active_label, b"toggle_active")],
+        [Button.inline(unmatched_label, b"toggle_unmatched_passenger")],
         [Button.inline("🚫 Bloklanganlar", b"blocked_menu")],
         [Button.inline("🔌 Akkauntni uzish", b"logout_confirm"), Button.inline("❓ Yordam", b"help")],
     ]
@@ -156,6 +160,7 @@ def format_status(user) -> str:
             f"📱 Telefon: {user.phone or '-'}",
             f"📦 Buyurtma guruh: {user.order_group_id or 'ulanmagan'}",
             f"✅ Faol: {'ha' if user.is_active else 'yoq'}",
+            f"🧭 Aniqlanmagan xabarlarni yo'lovchi deb qabul qilish: {'ha' if user.assume_passenger_if_unmatched else 'yoq'}",
             f"💳 Obuna: {db_utils.format_subscription_status(user)}",
             f"🔑 Kalit so'zlar ({len(kws)}): {', '.join(kws) if kws else '-'}",
             f"🚖 Haydovchi so'zlari ({len(dkws)}): {', '.join(dkws) if dkws else '-'}",
@@ -482,6 +487,13 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
             await manager.start_client_for_user(user)
         user = db_utils.get_user(tg_user_id)
         await event.answer("Holat yangilandi.")
+        await event.edit("Bosh menyu:", buttons=main_menu(user))
+
+    elif data == b"toggle_unmatched_passenger":
+        new_value = not user.assume_passenger_if_unmatched
+        db_utils.toggle_assume_passenger(tg_user_id, new_value)
+        user = db_utils.get_user(tg_user_id)
+        await event.answer("Sozlama yangilandi.")
         await event.edit("Bosh menyu:", buttons=main_menu(user))
 
     elif data == b"list_kw":

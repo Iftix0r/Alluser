@@ -219,7 +219,9 @@ class UserbotManager:
 
         matched = find_matched_keyword(text, keywords)
         if not matched:
-            return False
+            if not current.assume_passenger_if_unmatched:
+                return False
+            matched = "aniqlanmagan (yo'lovchi deb qabul qilindi)"
 
         sender = await message.get_sender()
         if getattr(sender, "bot", False):

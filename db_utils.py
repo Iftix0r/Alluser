@@ -275,6 +275,17 @@ def toggle_active(tg_user_id: int, active: bool) -> None:
         db.close()
 
 
+def toggle_assume_passenger(tg_user_id: int, value: bool) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if user:
+            user.assume_passenger_if_unmatched = value
+            db.commit()
+    finally:
+        db.close()
+
+
 def toggle_excluded_group(user_id: int, chat_id: int) -> bool:
     """Guruh holatini almashtiradi. True = endi istisno qilindi, False = endi kuzatiladi."""
     db = SessionLocal()
