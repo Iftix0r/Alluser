@@ -3,7 +3,7 @@ import re
 PHONE_RE = re.compile(r"(\+?\d[\d\s\-()]{7,17}\d)")
 MIN_PHONE_DIGITS = 9
 MAX_PHONE_DIGITS = 15
-MAX_ORDER_TEXT_LENGTH = 100
+MAX_ORDER_TEXT_LENGTH = 150
 MIN_MEANINGFUL_LETTERS = 3
 MAX_BLANK_LINES = 1
 URL_RE = re.compile(r"(https?://|t\.me/|www\.)\S+", re.IGNORECASE)
