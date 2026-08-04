@@ -43,14 +43,6 @@ def find_matched_keyword(text: str, keywords: list[str]) -> str | None:
     return None
 
 
-def is_valid_order_text(text: str) -> bool:
-    if not text or len(text) > MAX_ORDER_TEXT_LENGTH:
-        return False
-    if URL_RE.search(text):
-        return False
-    return True
-
-
 def has_meaningful_text(text: str) -> bool:
     """Emoji, raqam yoki belgilardan iborat, real matn bo'lmagan xabarlarni chiqarib tashlash uchun."""
     return len(LETTER_RE.findall(text or "")) >= MIN_MEANINGFUL_LETTERS
@@ -66,3 +58,13 @@ def has_excessive_blank_lines(text: str) -> bool:
     so'rovlari emas."""
     blank_count = sum(1 for line in (text or "").split("\n") if not line.strip())
     return blank_count > MAX_BLANK_LINES
+
+
+def is_valid_order_text(text: str) -> bool:
+    if not text or len(text) > MAX_ORDER_TEXT_LENGTH:
+        return False
+    if URL_RE.search(text):
+        return False
+    if has_excessive_blank_lines(text):
+        return False
+    return True
