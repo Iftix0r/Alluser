@@ -45,10 +45,28 @@ ADMIN_IDS=123456789
 
 `ADMIN_IDS` — admin panelga kirish huquqiga ega Telegram foydalanuvchi ID'lari (vergul bilan bir nechtasini yozish mumkin). O'z ID'ingizni bilish uchun [@userinfobot](https://t.me/userinfobot) ga yozing.
 
-Ishga tushirish:
+Ishga tushirish (qo'lda, test uchun):
 
 ```bash
 python3 main.py
+```
+
+### Doimiy ishlashi uchun (systemd)
+
+`nohup` o'rniga systemd tavsiya qilinadi — bot terminal yopilganda ham, server qayta yuklanganda ham, dastur qulab tushib qolsa ham avtomatik qayta ishga tushadi.
+
+```bash
+sudo cp aluser.service /etc/systemd/system/aluser.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now aluser
+```
+
+Foydali buyruqlar:
+
+```bash
+sudo systemctl status aluser     # holatini ko'rish
+sudo systemctl restart aluser    # qayta ishga tushirish
+journalctl -u aluser -f          # loglarni jonli kuzatish
 ```
 
 ## Foydalanish oqimi

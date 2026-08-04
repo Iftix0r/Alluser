@@ -1,0 +1,15 @@
+[Unit]
+Description=Aluser Telegram Userbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=if
+WorkingDirectory=/home/if/Documents/Github/Aluser
+ExecStart=/home/if/Documents/Github/Aluser/start.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
