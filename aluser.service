@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/2/2/Alluser
-ExecStart=/root/2/2/Alluser/start.sh
+WorkingDirectory=/root/2026-07-01/2027/Alluser
+ExecStart=/root/2026-07-01/2027/Alluser/start.sh
 Restart=always
 RestartSec=5
 
