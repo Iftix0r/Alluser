@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import time
 from collections import deque
@@ -245,13 +246,13 @@ class UserbotManager:
         message_lines = [
             "🚕 Yangi buyurtma!",
             "",
-            f"🔑 Kalit so'z: {matched}",
-            f"👤 Ism: {name}",
-            f"🔗 Username: {username}",
-            f"📞 Telefon: {phone}",
-            f"📍 Guruh: {chat_title}",
+            f"🔑 Kalit so'z: {html.escape(matched)}",
+            f"👤 Ism: {html.escape(name)}",
+            f"🔗 Username: {html.escape(username)}",
+            f"📞 Telefon: {html.escape(phone)}",
+            f"📍 Guruh: {html.escape(chat_title)}",
             "",
-            f"💬 Xabar:\n{text}",
+            f"💬 Xabar:\n<b><i>{html.escape(text)}</i></b>",
         ]
         order_text = "\n".join(message_lines)
 
@@ -269,7 +270,7 @@ class UserbotManager:
 
         try:
             await self.bot_client.send_message(
-                current.order_group_id, order_text, buttons=buttons, link_preview=False, parse_mode=None
+                current.order_group_id, order_text, buttons=buttons, link_preview=False, parse_mode="html"
             )
         except RPCError:
             logger.exception("Buyurtma guruhga yuborilmadi: user=%s", current.tg_user_id)
