@@ -8,3 +8,5 @@ API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///aluser.db")
+SESSION_ENCRYPTION_KEY = os.environ["SESSION_ENCRYPTION_KEY"]
+ADMIN_IDS = {int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip()}
