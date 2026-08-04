@@ -7,6 +7,18 @@ MAX_ORDER_TEXT_LENGTH = 100
 MIN_MEANINGFUL_LETTERS = 3
 URL_RE = re.compile(r"(https?://|t\.me/|www\.)\S+", re.IGNORECASE)
 LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
+EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U00002B00-\U00002BFF"
+    "\U0001F900-\U0001F9FF"
+    "\U00002190-\U000021FF"
+    "\U00002300-\U000023FF"
+    "\U0000FE0F"
+    "]+"
+)
 
 
 def extract_phone(text: str) -> str | None:
@@ -41,3 +53,7 @@ def is_valid_order_text(text: str) -> bool:
 def has_meaningful_text(text: str) -> bool:
     """Emoji, raqam yoki belgilardan iborat, real matn bo'lmagan xabarlarni chiqarib tashlash uchun."""
     return len(LETTER_RE.findall(text or "")) >= MIN_MEANINGFUL_LETTERS
+
+
+def has_emoji(text: str) -> bool:
+    return bool(EMOJI_RE.search(text or ""))
