@@ -3,7 +3,6 @@ import logging
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 from cryptography.fernet import InvalidToken
 from telethon import TelegramClient, events, utils
@@ -22,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 RATE_LIMIT_COUNT = 20
 RATE_LIMIT_WINDOW_SECONDS = 60
-LOCAL_TZ = ZoneInfo("Asia/Tashkent")
 
 CATCHUP_ORDER_LIMIT = 20
 CATCHUP_MESSAGES_PER_GROUP = 30
@@ -252,7 +250,6 @@ class UserbotManager:
             f"🔗 Username: {username}",
             f"📞 Telefon: {phone}",
             f"📍 Guruh: {chat_title}",
-            f"🕒 Vaqt: {message.date.astimezone(LOCAL_TZ).strftime('%Y-%m-%d %H:%M')}",
             "",
             f"💬 Xabar:\n{text}",
         ]
