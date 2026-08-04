@@ -55,9 +55,10 @@ async def main() -> None:
 
     bot_client = TelegramClient("bot_session", API_ID, API_HASH)
     await bot_client.start(bot_token=BOT_TOKEN)
+    bot_username = (await bot_client.get_me()).username
 
     manager = UserbotManager(bot_client)
-    register_handlers(bot_client, manager)
+    register_handlers(bot_client, manager, bot_username)
     register_admin_handlers(bot_client, manager)
 
     await manager.start_all()

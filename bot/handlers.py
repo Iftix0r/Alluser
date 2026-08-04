@@ -44,8 +44,8 @@ HELP = (
     "/removegroup - buyurtma guruhni uzish\n"
     "/groups - kuzatiladigan guruhlarni boshqarish\n"
     "/logout - akkauntni uzish\n\n"
-    "Buyurtmalar guruhini ulash uchun bosh menyudagi \"🔗 Buyurtma guruhini ulash\" "
-    "tugmasini bosing va guruh ID raqamini yuboring.\n\n"
+    "Buyurtmalar guruhini ulash uchun bosh menyudagi \"📦 Buyurtma guruhi\" → "
+    "\"➕ Guruhga qo'shish\" tugmasini bosing va ro'yxatdan guruhni tanlang — avtomatik ulanadi.\n\n"
     "Haydovchi so'zlari: agar xabarda shu so'zlardan biri bo'lsa, xabar buyurtma "
     "sifatida olinmaydi (masalan, haydovchilarning o'zaro yozishuvlarini chiqarib "
     "tashlash uchun).\n\n"
@@ -139,9 +139,11 @@ def driver_keyword_submenu() -> list:
     ]
 
 
-def order_group_submenu() -> list:
+def order_group_submenu(tg_user_id: int, bot_username: str) -> list:
+    add_url = f"https://t.me/{bot_username}?startgroup=setgroup_{tg_user_id}"
     return [
-        [Button.inline("🔗 Ulash", b"set_group"), Button.inline("🗑 Uzish", b"remove_group")],
+        [Button.url("➕ Guruhga qo'shish", add_url)],
+        [Button.inline("🔗 ID orqali ulash", b"set_group"), Button.inline("🗑 Uzish", b"remove_group")],
         [Button.inline("« Bosh menyu", b"menu")],
     ]
 
@@ -204,7 +206,7 @@ def blocked_list_view(tg_user_id: int) -> tuple[str, list]:
     return "🚫 Bloklangan foydalanuvchilar (blokdan chiqarish uchun bosing):", buttons
 
 
-def register_handlers(bot_client: TelegramClient, manager) -> None:
+def register_handlers(bot_client: TelegramClient, manager, bot_username: str) -> None:
     @bot_client.on(events.NewMessage(pattern="/start", func=lambda e: e.is_private))
     async def start_handler(event):
         tg_user_id = event.sender_id
@@ -327,9 +329,25 @@ def register_handlers(bot_client: TelegramClient, manager) -> None:
             await event.respond("Akkaunt ulanmagan. /start bosing.")
             return
         await event.respond(
-            "ℹ️ Buyurtmalar guruhini ulash uchun endi guruh ichiga kirish shart emas — "
-            "pastdagi tugmani bosib guruh ID raqamini yuborishingiz kifoya.",
-            buttons=[[Button.inline("🔗 Buyurtma guruhini ulash", b"set_group")]],
+            "ℹ️ Buyurtmalar guruhini ulash uchun \"➕ Guruhga qo'shish\" tugmasini bosib "
+            "kerakli guruhni tanlang — guruh avtomatik ulanadi.",
+            buttons=order_group_submenu(event.sender_id, bot_username),
+        )
+
+    @bot_client.on(
+        events.NewMessage(pattern=r"^/start(?:@\w+)?\s+setgroup_(\d+)$", func=lambda e: e.is_group)
+    )
+    async def start_group_deeplink_handler(event):
+        tg_user_id = int(event.pattern_match.group(1))
+        user = db_utils.get_user(tg_user_id)
+        if not user or not user.session_string:
+            await event.respond("Bu guruhni ulashga urinilgan akkaunt topilmadi yoki ulanmagan.")
+            return
+        ok = db_utils.set_order_group(tg_user_id, event.chat_id)
+        await event.respond(
+            "✅ Bu guruh buyurtmalar guruhi sifatida belgilandi."
+            if ok
+            else "Xatolik: avval akkauntni ulang."
         )
 
     @bot_client.on(events.CallbackQuery(func=lambda e: e.is_group and e.data == b"order_claim"))
@@ -417,7 +435,7 @@ def register_handlers(bot_client: TelegramClient, manager) -> None:
         data = event.data
 
         try:
-            await _dispatch_callback(event, data, tg_user_id, user, bot_client, manager)
+            await _dispatch_callback(event, data, tg_user_id, user, bot_client, manager, bot_username)
         except Exception:
             logger.exception("Callback ishlov berishda xatolik: data=%s, user=%s", data, tg_user_id)
             try:
@@ -426,7 +444,7 @@ def register_handlers(bot_client: TelegramClient, manager) -> None:
                 await event.respond(GENERIC_ERROR_TEXT)
 
 
-async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager) -> None:
+async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager, bot_username: str) -> None:
     if data == b"menu":
         user = db_utils.get_user(tg_user_id)
         await event.edit("Bosh menyu:", buttons=main_menu(user))
@@ -443,7 +461,7 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager)
         await event.answer()
         await event.edit(
             f"📦 Buyurtma guruh: {user.order_group_id or 'ulanmagan'}",
-            buttons=order_group_submenu(),
+            buttons=order_group_submenu(tg_user_id, bot_username),
         )
 
     elif data == b"help":
@@ -662,7 +680,7 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager)
         user = db_utils.get_user(tg_user_id)
         await event.edit(
             f"📦 Buyurtma guruh: {user.order_group_id or 'ulanmagan'}",
-            buttons=order_group_submenu(),
+            buttons=order_group_submenu(tg_user_id, bot_username),
         )
 
     elif data == b"blocked_menu":
