@@ -273,7 +273,11 @@ class UserbotManager:
 
         matched = find_matched_keyword(text, keywords)
         if not matched:
-            if not current.assume_passenger_if_unmatched or not has_meaningful_text(text):
+            if (
+                not current.assume_passenger_if_unmatched
+                or not has_meaningful_text(text)
+                or message.media
+            ):
                 return False
             matched = "aniqlanmagan (yo'lovchi deb qabul qilindi)"
 
