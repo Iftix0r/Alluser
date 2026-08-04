@@ -26,6 +26,7 @@ class User(Base):
     order_group_id = Column(BigInteger, nullable=True)
     is_active = Column(Boolean, default=True)
     assume_passenger_if_unmatched = Column(Boolean, default=False, nullable=False)
+    default_keywords_seeded = Column(Boolean, default=False, nullable=False)
     subscription_expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

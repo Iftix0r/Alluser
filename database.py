@@ -9,6 +9,12 @@ engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = scoped_session(sessionmaker(bind=engine))
 
 
+USERS_TABLE_MIGRATIONS = [
+    ("assume_passenger_if_unmatched", "ALTER TABLE users ADD COLUMN assume_passenger_if_unmatched BOOLEAN DEFAULT 0 NOT NULL"),
+    ("default_keywords_seeded", "ALTER TABLE users ADD COLUMN default_keywords_seeded BOOLEAN DEFAULT 0 NOT NULL"),
+]
+
+
 def _migrate_add_missing_columns():
     """Base.metadata.create_all mavjud jadvallarga yangi ustun qo'shmaydi,
     shu sababli eski bazalarni qo'lda moslashtiramiz."""
@@ -16,11 +22,10 @@ def _migrate_add_missing_columns():
     if "users" not in inspector.get_table_names():
         return
     existing_columns = {col["name"] for col in inspector.get_columns("users")}
-    if "assume_passenger_if_unmatched" not in existing_columns:
-        with engine.begin() as conn:
-            conn.execute(
-                text("ALTER TABLE users ADD COLUMN assume_passenger_if_unmatched BOOLEAN DEFAULT 0 NOT NULL")
-            )
+    with engine.begin() as conn:
+        for column_name, ddl in USERS_TABLE_MIGRATIONS:
+            if column_name not in existing_columns:
+                conn.execute(text(ddl))
 
 
 def init_db():

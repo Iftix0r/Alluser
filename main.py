@@ -9,6 +9,7 @@ from bot.admin_handlers import register_admin_handlers
 from bot.handlers import register_handlers
 from config import API_HASH, API_ID, BOT_TOKEN
 from database import init_db
+from db_utils import seed_default_keywords_for_existing_users
 from userbot.manager import UserbotManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -62,6 +63,9 @@ async def main() -> None:
     lock_file = acquire_single_instance_lock()
 
     init_db()
+    seeded = seed_default_keywords_for_existing_users()
+    if seeded:
+        logger.info("Dastlabki kalit so'zlar %s ta eski foydalanuvchiga qo'shildi.", seeded)
 
     bot_client = TelegramClient("bot_session", API_ID, API_HASH)
     await bot_client.start(bot_token=BOT_TOKEN)

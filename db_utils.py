@@ -2,9 +2,10 @@ from datetime import datetime, timedelta
 
 from crypto_utils import encrypt_session
 from database import SessionLocal
+from default_keywords import DEFAULT_DRIVER_KEYWORDS, DEFAULT_PASSENGER_KEYWORDS
 from models import AdSettings, AdTargetGroup, BlockedSender, DriverKeyword, ExcludedGroup, Keyword, User
 
-MAX_KEYWORD_LENGTH = 32
+MAX_KEYWORD_LENGTH = 200
 TRIAL_DAYS = 3
 MAX_AD_TEXT_LENGTH = 1000
 MIN_AD_INTERVAL_MINUTES = 15
@@ -19,6 +20,11 @@ def get_user(tg_user_id: int) -> User | None:
         db.close()
 
 
+def _add_default_keywords(db, user_id: int) -> None:
+    db.bulk_save_objects([Keyword(user_id=user_id, word=w) for w in DEFAULT_PASSENGER_KEYWORDS])
+    db.bulk_save_objects([DriverKeyword(user_id=user_id, word=w) for w in DEFAULT_DRIVER_KEYWORDS])
+
+
 def get_or_create_user(tg_user_id: int) -> User:
     db = SessionLocal()
     try:
@@ -28,7 +34,33 @@ def get_or_create_user(tg_user_id: int) -> User:
             db.add(user)
             db.commit()
             db.refresh(user)
+            _add_default_keywords(db, user.id)
+            user.default_keywords_seeded = True
+            db.commit()
+            db.refresh(user)
         return user
+    finally:
+        db.close()
+
+
+def seed_default_keywords_for_existing_users() -> int:
+    """Ilgari ro'yxatdan o'tgan, lekin hali hech qanday kalit so'z qo'shmagan
+    foydalanuvchilarga dastlabki ro'yxatni beradi. Faqat bir marta ishlaydi
+    (har bir foydalanuvchi uchun `default_keywords_seeded` bayrog'i bilan belgilanadi),
+    shu sababli o'zi ataylab bo'shatib qo'ygan ro'yxatni qayta to'ldirmaydi."""
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter_by(default_keywords_seeded=False).all()
+        seeded = 0
+        for user in users:
+            has_kw = db.query(Keyword).filter_by(user_id=user.id).first() is not None
+            has_dkw = db.query(DriverKeyword).filter_by(user_id=user.id).first() is not None
+            if not has_kw and not has_dkw:
+                _add_default_keywords(db, user.id)
+                seeded += 1
+            user.default_keywords_seeded = True
+        db.commit()
+        return seeded
     finally:
         db.close()
 
