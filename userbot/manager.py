@@ -16,7 +16,7 @@ from telethon.tl.types import InputMessageEntityMentionName
 import db_utils
 from config import API_HASH, API_ID
 from crypto_utils import decrypt_session
-from matcher import extract_phone, find_matched_keyword, is_valid_order_text
+from matcher import extract_phone, find_matched_keyword, has_meaningful_text, is_valid_order_text
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +273,7 @@ class UserbotManager:
 
         matched = find_matched_keyword(text, keywords)
         if not matched:
-            if not current.assume_passenger_if_unmatched:
+            if not current.assume_passenger_if_unmatched or not has_meaningful_text(text):
                 return False
             matched = "aniqlanmagan (yo'lovchi deb qabul qilindi)"
 

@@ -4,7 +4,9 @@ PHONE_RE = re.compile(r"(\+?\d[\d\s\-()]{7,17}\d)")
 MIN_PHONE_DIGITS = 9
 MAX_PHONE_DIGITS = 15
 MAX_ORDER_TEXT_LENGTH = 100
+MIN_MEANINGFUL_LETTERS = 3
 URL_RE = re.compile(r"(https?://|t\.me/|www\.)\S+", re.IGNORECASE)
+LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 
 
 def extract_phone(text: str) -> str | None:
@@ -34,3 +36,8 @@ def is_valid_order_text(text: str) -> bool:
     if URL_RE.search(text):
         return False
     return True
+
+
+def has_meaningful_text(text: str) -> bool:
+    """Emoji, raqam yoki belgilardan iborat, real matn bo'lmagan xabarlarni chiqarib tashlash uchun."""
+    return len(LETTER_RE.findall(text or "")) >= MIN_MEANINGFUL_LETTERS
