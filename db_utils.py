@@ -2,10 +2,13 @@ from datetime import datetime, timedelta
 
 from crypto_utils import encrypt_session
 from database import SessionLocal
-from models import BlockedSender, DriverKeyword, ExcludedGroup, Keyword, User
+from models import AdSettings, AdTargetGroup, BlockedSender, DriverKeyword, ExcludedGroup, Keyword, User
 
 MAX_KEYWORD_LENGTH = 32
 TRIAL_DAYS = 3
+MAX_AD_TEXT_LENGTH = 1000
+MIN_AD_INTERVAL_MINUTES = 15
+DEFAULT_AD_INTERVAL_MINUTES = 60
 
 
 def get_user(tg_user_id: int) -> User | None:
@@ -407,6 +410,136 @@ def list_blocked_senders(tg_user_id: int) -> list[BlockedSender]:
         )
         db.expunge_all()
         return rows
+    finally:
+        db.close()
+
+
+def _get_or_create_ad_settings(db, user: User) -> AdSettings:
+    settings = db.query(AdSettings).filter_by(user_id=user.id).first()
+    if not settings:
+        settings = AdSettings(user_id=user.id, interval_minutes=DEFAULT_AD_INTERVAL_MINUTES)
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return settings
+
+
+def get_ad_settings(tg_user_id: int) -> AdSettings | None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return None
+        settings = _get_or_create_ad_settings(db, user)
+        db.expunge(settings)
+        return settings
+    finally:
+        db.close()
+
+
+def set_ad_text(tg_user_id: int, text: str) -> bool:
+    text = text.strip()
+    if not text or len(text) > MAX_AD_TEXT_LENGTH:
+        return False
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return False
+        settings = _get_or_create_ad_settings(db, user)
+        settings.text = text
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def set_ad_interval(tg_user_id: int, minutes: int) -> bool:
+    if minutes < MIN_AD_INTERVAL_MINUTES:
+        return False
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return False
+        settings = _get_or_create_ad_settings(db, user)
+        settings.interval_minutes = minutes
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def toggle_ad_active(tg_user_id: int, value: bool) -> bool:
+    """Yoqish faqat matn va kamida bitta guruh belgilangan bo'lsa muvaffaqiyatli bo'ladi."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return False
+        settings = _get_or_create_ad_settings(db, user)
+        if value:
+            has_target = db.query(AdTargetGroup).filter_by(user_id=user.id).first() is not None
+            if not settings.text or not has_target:
+                return False
+        settings.is_active = value
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def toggle_ad_target_group(user_id: int, chat_id: int) -> bool:
+    """True = endi tanlandi, False = endi olib tashlandi."""
+    db = SessionLocal()
+    try:
+        existing = db.query(AdTargetGroup).filter_by(user_id=user_id, chat_id=chat_id).first()
+        if existing:
+            db.delete(existing)
+            db.commit()
+            return False
+        db.add(AdTargetGroup(user_id=user_id, chat_id=chat_id))
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def get_ad_target_group_ids(user_id: int) -> set[int]:
+    db = SessionLocal()
+    try:
+        rows = db.query(AdTargetGroup.chat_id).filter_by(user_id=user_id).all()
+        return {row[0] for row in rows}
+    finally:
+        db.close()
+
+
+def update_ad_last_sent(user_id: int, when) -> None:
+    db = SessionLocal()
+    try:
+        settings = db.query(AdSettings).filter_by(user_id=user_id).first()
+        if settings:
+            settings.last_sent_at = when
+            db.commit()
+    finally:
+        db.close()
+
+
+def get_users_with_active_ads() -> list[User]:
+    db = SessionLocal()
+    try:
+        users = (
+            db.query(User)
+            .join(AdSettings)
+            .filter(
+                User.is_active.is_(True),
+                User.session_string.isnot(None),
+                AdSettings.is_active.is_(True),
+            )
+            .all()
+        )
+        db.expunge_all()
+        return users
     finally:
         db.close()
 

@@ -28,6 +28,8 @@ CATCHUP_MESSAGES_PER_GROUP = 30
 CATCHUP_LOOKBACK_HOURS = 12
 CATCHUP_DIALOG_LIMIT = 200
 
+AD_SEND_DELAY_SECONDS = 3
+
 
 class UserbotManager:
     """Har bir ulangan foydalanuvchi uchun alohida Telethon user-client boshqaradi."""
@@ -119,6 +121,58 @@ class UserbotManager:
                 "admin bilan bog'lanib to'lovni amalga oshiring.",
             )
             logger.info("Obuna tugadi, to'xtatildi: tg_user_id=%s", user.tg_user_id)
+
+    async def _send_ad_to_groups(self, user, settings, target_ids: set[int]) -> int:
+        client = self.clients.get(user.id)
+        if not client:
+            return 0
+        sent = 0
+        for chat_id in target_ids:
+            try:
+                await client.send_message(chat_id, settings.text, link_preview=False)
+                sent += 1
+            except RPCError:
+                logger.warning("Reklama yuborilmadi: user=%s, chat=%s", user.tg_user_id, chat_id)
+            except Exception:
+                logger.exception(
+                    "Reklama yuborishda kutilmagan xatolik: user=%s, chat=%s", user.tg_user_id, chat_id
+                )
+            await asyncio.sleep(AD_SEND_DELAY_SECONDS)
+        if sent:
+            await asyncio.to_thread(db_utils.update_ad_last_sent, user.id, datetime.utcnow())
+        return sent
+
+    async def run_ad_broadcast_cycle(self) -> None:
+        """Belgilangan intervalda reklama matnini foydalanuvchi tanlagan guruhlarga yuboradi."""
+        now = datetime.utcnow()
+        for user in await asyncio.to_thread(db_utils.get_users_with_active_ads):
+            if not self.clients.get(user.id):
+                continue
+            if not db_utils.is_subscription_active(user):
+                continue
+            settings = await asyncio.to_thread(db_utils.get_ad_settings, user.tg_user_id)
+            if not settings or not settings.is_active or not settings.text:
+                continue
+            if settings.last_sent_at and now - settings.last_sent_at < timedelta(minutes=settings.interval_minutes):
+                continue
+            target_ids = await asyncio.to_thread(db_utils.get_ad_target_group_ids, user.id)
+            if not target_ids:
+                continue
+            await self._send_ad_to_groups(user, settings, target_ids)
+
+    async def send_ad_now(self, user_db_id: int) -> int | None:
+        """Reklamani darhol yuboradi (test/qo'lda). Yuborilgan guruhlar sonini qaytaradi,
+        sozlamalar to'liq bo'lmasa None."""
+        user = await asyncio.to_thread(db_utils.find_user_by_id, user_db_id)
+        if not user or not self.clients.get(user_db_id):
+            return None
+        settings = await asyncio.to_thread(db_utils.get_ad_settings, user.tg_user_id)
+        if not settings or not settings.text:
+            return None
+        target_ids = await asyncio.to_thread(db_utils.get_ad_target_group_ids, user_db_id)
+        if not target_ids:
+            return None
+        return await self._send_ad_to_groups(user, settings, target_ids)
 
     async def notify(self, tg_user_id: int, text: str) -> None:
         try:

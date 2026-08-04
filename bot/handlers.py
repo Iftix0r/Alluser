@@ -51,7 +51,10 @@ HELP = (
     "tashlash uchun).\n\n"
     "Bloklash: buyurtma xabaridagi \"🚫 Bloklash\" tugmasini bossangiz, o'sha xabar "
     "buyurtma guruhidan o'chadi va o'sha mijozdan boshqa buyurtmalar kelmaydi. "
-    "Bosh menyudagi \"🚫 Bloklanganlar\" bo'limidan blokdan chiqarishingiz mumkin."
+    "Bosh menyudagi \"🚫 Bloklanganlar\" bo'limidan blokdan chiqarishingiz mumkin.\n\n"
+    "Reklama: bosh menyudagi \"📢 Reklama\" bo'limida matn, yuborish intervali va "
+    "qaysi guruhlarga yuborilishini sozlashingiz mumkin. Yoqilgach, belgilangan "
+    "intervalda tanlangan guruhlarga avtomatik yuboriladi."
 )
 
 LOGOUT_CONFIRM_TEXT = (
@@ -122,7 +125,7 @@ def main_menu(user) -> list:
         [Button.inline("📦 Buyurtma guruhi", b"group_menu"), Button.inline("🗂 Kuzatiladigan guruhlar", b"groups_menu")],
         [Button.inline("📊 Holat", b"status"), Button.inline(active_label, b"toggle_active")],
         [Button.inline(unmatched_label, b"toggle_unmatched_passenger")],
-        [Button.inline("🚫 Bloklanganlar", b"blocked_menu")],
+        [Button.inline("🚫 Bloklanganlar", b"blocked_menu"), Button.inline("📢 Reklama", b"ad_menu")],
         [Button.inline("🔌 Akkauntni uzish", b"logout_confirm"), Button.inline("❓ Yordam", b"help")],
     ]
 
@@ -209,6 +212,61 @@ def blocked_list_view(tg_user_id: int) -> tuple[str, list]:
     ]
     buttons.append([Button.inline("« Bosh menyu", b"menu")])
     return "🚫 Bloklangan foydalanuvchilar (blokdan chiqarish uchun bosing):", buttons
+
+
+def ad_menu_view(user) -> tuple[str, list]:
+    settings = db_utils.get_ad_settings(user.tg_user_id)
+    target_count = len(db_utils.get_ad_target_group_ids(user.id))
+    preview = (settings.text[:80] + "…") if settings.text and len(settings.text) > 80 else (settings.text or "belgilanmagan")
+    active_label = "⏸ O'chirish" if settings.is_active else "▶️ Yoqish"
+    status_label = "yoqilgan" if settings.is_active else "o'chirilgan"
+    last_sent_label = settings.last_sent_at.strftime("%Y-%m-%d %H:%M") if settings.last_sent_at else "-"
+    text = "\n".join(
+        [
+            "📢 Reklama sozlamalari:",
+            "",
+            f"📝 Matn: {preview}",
+            f"⏱ Interval: {settings.interval_minutes} daqiqa",
+            f"🗂 Tanlangan guruhlar: {target_count} ta",
+            f"▶️ Holat: {status_label}",
+            f"🕓 Oxirgi yuborilgan: {last_sent_label}",
+        ]
+    )
+    buttons = [
+        [Button.inline("✏️ Matnni sozlash", b"ad_set_text"), Button.inline("⏱ Intervalni sozlash", b"ad_set_interval")],
+        [Button.inline("🗂 Guruhlarni tanlash", b"ad_groups_menu")],
+        [Button.inline(active_label, b"ad_toggle_active"), Button.inline("🚀 Hozir yuborish", b"ad_send_now")],
+        [Button.inline("« Bosh menyu", b"menu")],
+    ]
+    return text, buttons
+
+
+async def send_ad_groups_list(respond, manager, user) -> None:
+    client = manager.clients.get(user.id)
+    if not client:
+        await respond("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
+        return
+
+    selected = db_utils.get_ad_target_group_ids(user.id)
+    buttons = []
+    async for dialog in client.iter_dialogs(limit=200):
+        if not dialog.is_group:
+            continue
+        mark = "🟢" if dialog.id in selected else "⚪"
+        label = f"{mark} {dialog.name}"[:64]
+        buttons.append([Button.inline(label, f"toggad:{dialog.id}".encode())])
+        if len(buttons) >= GROUPS_PAGE_LIMIT:
+            break
+
+    if not buttons:
+        await respond("Siz a'zo bo'lgan guruhlar topilmadi.")
+        return
+
+    buttons.append([Button.inline("« Reklama menyusi", b"ad_menu")])
+    await respond(
+        "🟢 = reklama shu guruhga yuboriladi, ⚪ = yuborilmaydi. Holatni almashtirish uchun guruh nomini bosing:",
+        buttons=buttons,
+    )
 
 
 def register_handlers(bot_client: TelegramClient, manager, bot_username: str) -> None:
@@ -706,6 +764,91 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         await event.answer("✅ Blokdan chiqarildi." if ok else "Topilmadi.")
         text, buttons = blocked_list_view(tg_user_id)
         await event.edit(text, buttons=buttons)
+
+    elif data == b"ad_menu":
+        await event.answer()
+        text, buttons = ad_menu_view(user)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"ad_set_text":
+        await event.answer()
+        try:
+            async with bot_client.conversation(event.chat_id, timeout=180) as conv:
+                await conv.send_message(
+                    f"Reklama matnini yuboring (ko'pi bilan {db_utils.MAX_AD_TEXT_LENGTH} belgi):"
+                )
+                try:
+                    resp = await conv.get_response()
+                except asyncio.TimeoutError:
+                    await conv.send_message("Vaqt tugadi.")
+                    return
+                ok = db_utils.set_ad_text(tg_user_id, resp.raw_text or "")
+                if ok:
+                    await conv.send_message("✅ Reklama matni saqlandi.")
+                else:
+                    await conv.send_message(
+                        f"❌ Matn bo'sh yoki juda uzun (ko'pi bilan {db_utils.MAX_AD_TEXT_LENGTH} belgi)."
+                    )
+        except AlreadyInConversationError:
+            await event.respond(BUSY_TEXT)
+
+    elif data == b"ad_set_interval":
+        await event.answer()
+        try:
+            async with bot_client.conversation(event.chat_id, timeout=120) as conv:
+                await conv.send_message(
+                    "Reklama necha daqiqada bir marta yuborilsin? Raqam kiriting "
+                    f"(kamida {db_utils.MIN_AD_INTERVAL_MINUTES} daqiqa, masalan: 60):"
+                )
+                try:
+                    resp = await conv.get_response()
+                except asyncio.TimeoutError:
+                    await conv.send_message("Vaqt tugadi.")
+                    return
+                try:
+                    minutes = int(resp.raw_text.strip())
+                except ValueError:
+                    await conv.send_message("❌ Noto'g'ri qiymat. Faqat butun son yuboring.")
+                    return
+                ok = db_utils.set_ad_interval(tg_user_id, minutes)
+                if ok:
+                    await conv.send_message(f"✅ Interval {minutes} daqiqaga sozlandi.")
+                else:
+                    await conv.send_message(
+                        f"❌ Interval kamida {db_utils.MIN_AD_INTERVAL_MINUTES} daqiqa bo'lishi kerak."
+                    )
+        except AlreadyInConversationError:
+            await event.respond(BUSY_TEXT)
+
+    elif data == b"ad_groups_menu":
+        await event.answer()
+        await send_ad_groups_list(event.respond, manager, user)
+
+    elif data.startswith(b"toggad:"):
+        chat_id = int(data[len(b"toggad:"):])
+        now_selected = db_utils.toggle_ad_target_group(user.id, chat_id)
+        await event.answer("🟢 Ro'yxatga qo'shildi" if now_selected else "⚪ Ro'yxatdan olib tashlandi")
+
+    elif data == b"ad_toggle_active":
+        settings = db_utils.get_ad_settings(tg_user_id)
+        new_value = not settings.is_active
+        ok = db_utils.toggle_ad_active(tg_user_id, new_value)
+        if not ok and new_value:
+            await event.answer(
+                "❌ Avval reklama matnini va kamida bitta guruhni belgilang.", alert=True
+            )
+            return
+        await event.answer("✅ Yoqildi." if new_value else "⏸ O'chirildi.")
+        text, buttons = ad_menu_view(user)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"ad_send_now":
+        await event.answer("Yuborilmoqda...")
+        sent = await manager.send_ad_now(user.id)
+        if sent is None:
+            await event.respond("❌ Avval reklama matnini va kamida bitta guruhni belgilang.")
+        else:
+            await event.respond(f"✅ {sent} ta guruhga yuborildi.")
 
     elif data == b"logout_confirm":
         await event.answer()

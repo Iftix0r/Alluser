@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 LOCK_PATH = "aluser.lock"
 SUBSCRIPTION_SWEEP_INTERVAL_SECONDS = 3600
+AD_BROADCAST_CHECK_INTERVAL_SECONDS = 60
 
 
 def acquire_single_instance_lock():
@@ -48,6 +49,15 @@ async def subscription_sweep_loop(manager: UserbotManager) -> None:
             logger.exception("Obuna tekshiruvida xatolik")
 
 
+async def ad_broadcast_loop(manager: UserbotManager) -> None:
+    while True:
+        await asyncio.sleep(AD_BROADCAST_CHECK_INTERVAL_SECONDS)
+        try:
+            await manager.run_ad_broadcast_cycle()
+        except Exception:
+            logger.exception("Reklama yuborish tsiklida xatolik")
+
+
 async def main() -> None:
     lock_file = acquire_single_instance_lock()
 
@@ -64,6 +74,7 @@ async def main() -> None:
     await manager.start_all()
 
     sweep_task = asyncio.create_task(subscription_sweep_loop(manager))
+    ad_task = asyncio.create_task(ad_broadcast_loop(manager))
 
     logger.info("Bot ishga tushdi.")
     try:
@@ -71,6 +82,7 @@ async def main() -> None:
     finally:
         logger.info("Bot to'xtatilmoqda, userbot klientlari uzilmoqda...")
         sweep_task.cancel()
+        ad_task.cancel()
         for user_db_id in list(manager.clients):
             await manager.stop_client_for_user(user_db_id)
         lock_file.close()
