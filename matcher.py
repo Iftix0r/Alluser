@@ -5,6 +5,7 @@ MIN_PHONE_DIGITS = 9
 MAX_PHONE_DIGITS = 15
 MAX_ORDER_TEXT_LENGTH = 100
 MIN_MEANINGFUL_LETTERS = 3
+MAX_BLANK_LINES = 1
 URL_RE = re.compile(r"(https?://|t\.me/|www\.)\S+", re.IGNORECASE)
 LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 EMOJI_RE = re.compile(
@@ -57,3 +58,11 @@ def has_meaningful_text(text: str) -> bool:
 
 def has_emoji(text: str) -> bool:
     return bool(EMOJI_RE.search(text or ""))
+
+
+def has_excessive_blank_lines(text: str) -> bool:
+    """Ko'p bo'sh qatorli, chiroyli formatlangan xabarlar odatda haydovchilarning
+    reklama/e'lon postlari bo'ladi (masalan "joy bor" e'lonlari), haqiqiy yo'lovchi
+    so'rovlari emas."""
+    blank_count = sum(1 for line in (text or "").split("\n") if not line.strip())
+    return blank_count > MAX_BLANK_LINES
