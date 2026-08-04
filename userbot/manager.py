@@ -237,33 +237,33 @@ class UserbotManager:
 
         name = " ".join(
             filter(None, [getattr(sender, "first_name", None), getattr(sender, "last_name", None)])
-        ) or "Noma'lum"
-        username = f"@{sender.username}" if getattr(sender, "username", None) else "yo'q"
-        phone = extract_phone(text) or "topilmadi"
+        )
+        username = f"@{sender.username}" if getattr(sender, "username", None) else None
+        phone = extract_phone(text)
 
         chat = await message.get_chat()
-        chat_title = getattr(chat, "title", "Noma'lum guruh")
+        chat_title = getattr(chat, "title", None)
         chat_username = getattr(chat, "username", None)
 
-        message_lines = [
-            "🚕 Yangi buyurtma!",
-            "",
-            f"🔑 Kalit so'z: {html.escape(matched)}",
-            "",
-            f"👤 Ism: {html.escape(name)}",
-            "",
-            f"🔗 Username: {html.escape(username)}",
-            "",
-            f"📞 Telefon: {html.escape(phone)}",
-        ]
-        if not chat_username:
-            message_lines += ["", f"📍 Guruh: {html.escape(chat_title)}"]
-        message_lines += ["", f"💬 Xabar:\n<b><i>{html.escape(text)}</i></b>"]
+        fields = [f"🔑 Kalit so'z: {html.escape(matched)}"]
+        if name:
+            fields.append(f"👤 Ism: {html.escape(name)}")
+        if username:
+            fields.append(f"🔗 Username: {html.escape(username)}")
+        if phone:
+            fields.append(f"📞 Telefon: {html.escape(phone)}")
+        if chat_title and not chat_username:
+            fields.append(f"📍 Guruh: {html.escape(chat_title)}")
+
+        message_lines = ["🚕 Yangi buyurtma!", ""]
+        for field in fields:
+            message_lines += [field, ""]
+        message_lines.append(f"💬 Xabar:\n<b><i>{html.escape(text)}</i></b>")
         order_text = "\n".join(message_lines)
 
         group_row = []
         if chat_username:
-            group_row.append(Button.url(f"📍 {chat_title}", f"https://t.me/{chat_username}"))
+            group_row.append(Button.url(f"📍 {chat_title or 'Guruh'}", f"https://t.me/{chat_username}"))
         link_row = []
         if chat_username:
             link_row.append(Button.url("🔗 Xabarga o'tish", f"https://t.me/{chat_username}/{message.id}"))
