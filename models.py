@@ -38,6 +38,7 @@ class User(Base):
         "AdSettings", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
     ad_target_groups = relationship("AdTargetGroup", back_populates="user", cascade="all, delete-orphan")
+    extra_accounts = relationship("ExtraAccount", back_populates="user", cascade="all, delete-orphan")
 
 
 class Keyword(Base):
@@ -105,3 +106,15 @@ class AdTargetGroup(Base):
     chat_id = Column(BigInteger, nullable=False)
 
     user = relationship("User", back_populates="ad_target_groups")
+
+
+class ExtraAccount(Base):
+    __tablename__ = "extra_accounts"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    phone = Column(String, nullable=False)
+    session_string = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="extra_accounts")

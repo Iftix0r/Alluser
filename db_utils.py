@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from crypto_utils import encrypt_session
 from database import SessionLocal
 from default_keywords import DEFAULT_DRIVER_KEYWORDS, DEFAULT_PASSENGER_KEYWORDS
-from models import AdSettings, AdTargetGroup, BlockedSender, DriverKeyword, ExcludedGroup, Keyword, User
+from models import AdSettings, AdTargetGroup, BlockedSender, DriverKeyword, ExcludedGroup, ExtraAccount, Keyword, User
 
 MAX_KEYWORD_LENGTH = 200
 TRIAL_DAYS = 3
@@ -583,5 +583,69 @@ def find_user_by_id(user_id: int) -> User | None:
         if user:
             db.expunge(user)
         return user
+    finally:
+        db.close()
+
+
+def add_extra_account(tg_user_id: int, phone: str, session_string: str) -> "ExtraAccount":
+    from crypto_utils import encrypt_session
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        acc = ExtraAccount(user_id=user.id, phone=phone, session_string=encrypt_session(session_string))
+        db.add(acc)
+        db.commit()
+        db.refresh(acc)
+        db.expunge(acc)
+        return acc
+    finally:
+        db.close()
+
+
+def list_extra_accounts(tg_user_id: int) -> list:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return []
+        accs = db.query(ExtraAccount).filter_by(user_id=user.id).all()
+        db.expunge_all()
+        return accs
+    finally:
+        db.close()
+
+
+def remove_extra_account(account_id: int, tg_user_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return False
+        acc = db.query(ExtraAccount).filter_by(id=account_id, user_id=user.id).first()
+        if not acc:
+            return False
+        db.delete(acc)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def get_all_extra_accounts() -> list:
+    db = SessionLocal()
+    try:
+        accs = db.query(ExtraAccount).all()
+        db.expunge_all()
+        return accs
+    finally:
+        db.close()
+
+
+def list_extra_accounts_by_user_db_id(user_db_id: int) -> list:
+    db = SessionLocal()
+    try:
+        accs = db.query(ExtraAccount).filter_by(user_id=user_db_id).all()
+        db.expunge_all()
+        return accs
     finally:
         db.close()

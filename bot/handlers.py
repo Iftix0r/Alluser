@@ -126,7 +126,8 @@ def main_menu(user) -> list:
         [Button.inline("📊 Holat", b"status"), Button.inline(active_label, b"toggle_active")],
         [Button.inline(unmatched_label, b"toggle_unmatched_passenger")],
         [Button.inline("🚫 Bloklanganlar", b"blocked_menu"), Button.inline("📢 Reklama", b"ad_menu")],
-        [Button.inline("🔌 Akkauntni uzish", b"logout_confirm"), Button.inline("❓ Yordam", b"help")],
+        [Button.inline("👥 Akkauntlar", b"accounts_menu"), Button.inline("❓ Yordam", b"help")],
+        [Button.inline("🔌 Akkauntni uzish", b"logout_confirm")],
     ]
 
 
@@ -864,6 +865,42 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         await event.answer("Bekor qilindi.")
         await event.edit("Bosh menyu:", buttons=main_menu(user))
 
+    elif data == b"accounts_menu":
+        await event.answer()
+        text, buttons = await _accounts_menu_view(tg_user_id)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"add_account":
+        await event.answer()
+        await run_extra_account_login(bot_client, manager, event.chat_id, tg_user_id)
+
+    elif data.startswith(b"delacc:"):
+        acc_id = int(data[len(b"delacc:"):])
+        accs = db_utils.list_extra_accounts(tg_user_id)
+        acc = next((a for a in accs if a.id == acc_id), None)
+        if acc:
+            await manager.stop_extra_client(acc_id)
+            db_utils.remove_extra_account(acc_id, tg_user_id)
+            await event.answer("O'chirildi.")
+        else:
+            await event.answer("Topilmadi.", alert=True)
+        text, buttons = await _accounts_menu_view(tg_user_id)
+        await event.edit(text, buttons=buttons)
+
+
+async def _accounts_menu_view(tg_user_id: int) -> tuple[str, list]:
+    accs = db_utils.list_extra_accounts(tg_user_id)
+    lines = ["👥 Qo'shimcha akkauntlar:"]
+    buttons = []
+    for acc in accs:
+        lines.append(f"📱 {acc.phone}")
+        buttons.append([Button.inline(f"🗑 {acc.phone} ni o'chirish", f"delacc:{acc.id}".encode())])
+    if not accs:
+        lines.append("Hozircha qo'shimcha akkaunt yo'q.")
+    buttons.append([Button.inline("➕ Akkaunt qo'shish", b"add_account")])
+    buttons.append([Button.inline("« Bosh menyu", b"menu")])
+    return "\n".join(lines), buttons
+
 
 async def run_login_flow(bot_client: TelegramClient, manager, chat_id: int, tg_user_id: int) -> None:
     try:
@@ -934,3 +971,63 @@ async def run_login_flow(bot_client: TelegramClient, manager, chat_id: int, tg_u
     except Exception:
         logger.exception("Login jarayonida xatolik: %s", tg_user_id)
         await bot_client.send_message(chat_id, "Xatolik yuz berdi. Qaytadan /start bosing.")
+
+
+async def run_extra_account_login(bot_client: TelegramClient, manager, chat_id: int, tg_user_id: int) -> None:
+    try:
+        async with bot_client.conversation(chat_id, timeout=300) as conv:
+            await conv.send_message(
+                "Qo'shmoqchi bo'lgan akkauntning telefon raqamini yuboring (masalan: +998901234567):",
+                buttons=[[Button.request_phone("📱 Telefon raqamni yuborish")]],
+            )
+            phone_msg = await conv.get_response()
+            if phone_msg.contact:
+                phone = phone_msg.contact.phone_number.strip()
+                if not phone.startswith("+"):
+                    phone = "+" + phone
+            else:
+                phone = phone_msg.raw_text.strip()
+
+            user_client = TelegramClient(StringSession(), API_ID, API_HASH)
+            await user_client.connect()
+
+            try:
+                sent = await user_client.send_code_request(phone)
+            except PhoneNumberInvalidError:
+                await conv.send_message("Telefon raqam noto'g'ri.", buttons=Button.clear())
+                await user_client.disconnect()
+                return
+
+            await conv.send_message(
+                "Telegram sizga kod yubordi. Raqamlar orasiga vergul qo'yib yuboring (masalan: 1,2,3,4,5):",
+                buttons=Button.clear(),
+            )
+            code_msg = await conv.get_response()
+            code = re.sub(r"\D", "", code_msg.raw_text)
+
+            try:
+                await user_client.sign_in(phone, code, phone_code_hash=sent.phone_code_hash)
+            except SessionPasswordNeededError:
+                await conv.send_message("2FA parolingizni kiriting:")
+                pwd_msg = await conv.get_response()
+                await user_client.sign_in(password=pwd_msg.raw_text.strip())
+            except (PhoneCodeInvalidError, PhoneCodeExpiredError):
+                await conv.send_message("Kod noto'g'ri yoki eskirgan. Qaytadan urinib ko'ring.")
+                await user_client.disconnect()
+                return
+
+            session_string = user_client.session.save()
+            await user_client.disconnect()
+
+            acc = db_utils.add_extra_account(tg_user_id, phone, session_string)
+            user = db_utils.get_user(tg_user_id)
+            await manager.start_extra_client(acc, tg_user_id, user.id)
+
+            await conv.send_message(f"✅ Qo'shimcha akkaunt ({phone}) ulandi!")
+    except asyncio.TimeoutError:
+        await bot_client.send_message(chat_id, "Vaqt tugadi.")
+    except AlreadyInConversationError:
+        await bot_client.send_message(chat_id, BUSY_TEXT)
+    except Exception:
+        logger.exception("Extra akkaunt login xatolik: %s", tg_user_id)
+        await bot_client.send_message(chat_id, "Xatolik yuz berdi.")

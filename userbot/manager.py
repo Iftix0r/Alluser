@@ -36,7 +36,10 @@ class UserbotManager:
 
     def __init__(self, bot_client: TelegramClient):
         self.bot_client = bot_client
+        # asosiy akkaunt: user_db_id -> TelegramClient
         self.clients: dict[int, TelegramClient] = {}
+        # qo'shimcha akkauntlar: extra_account_id -> TelegramClient
+        self.extra_clients: dict[int, TelegramClient] = {}
         self._forward_times: dict[int, deque] = {}
         self.claims: dict[tuple[int, int], str] = {}
 
@@ -98,6 +101,48 @@ class UserbotManager:
         self._forward_times.pop(user_db_id, None)
         if client:
             await client.disconnect()
+        # Extra akkauntlarni ham to'xtatish
+        for acc in db_utils.list_extra_accounts_by_user_db_id(user_db_id):
+            await self.stop_extra_client(acc.id)
+
+    async def start_extra_client(self, acc, tg_user_id: int, user_db_id: int) -> bool:
+        """Qo'shimcha akkaunt uchun client ishga tushiradi."""
+        if acc.id in self.extra_clients:
+            return True
+        try:
+            session_str = decrypt_session(acc.session_string)
+        except InvalidToken:
+            logger.error("Extra akkaunt %s sessiyasi buzilgan", acc.id)
+            db_utils.remove_extra_account(acc.id, tg_user_id)
+            return False
+
+        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+        try:
+            await client.connect()
+        except RPCError:
+            logger.exception("Extra akkaunt %s ga ulanib bo'lmadi", acc.id)
+            return False
+
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            db_utils.remove_extra_account(acc.id, tg_user_id)
+            await self.notify(tg_user_id, f"⚠️ Qo'shimcha akkaunt ({acc.phone}) sessiyasi yaroqsiz, o'chirildi.")
+            return False
+
+        acc_id = acc.id
+
+        @client.on(events.NewMessage(incoming=True))
+        async def handler(event, user_db_id=user_db_id, tg_user_id=tg_user_id):
+            await self._handle_message(event, user_db_id, tg_user_id)
+
+        self.extra_clients[acc_id] = client
+        logger.info("Extra userbot ishga tushdi: phone=%s, user=%s", acc.phone, tg_user_id)
+        return True
+
+    async def stop_extra_client(self, acc_id: int) -> None:
+        client = self.extra_clients.pop(acc_id, None)
+        if client:
+            await client.disconnect()
 
     async def start_all(self) -> None:
         for user in db_utils.get_active_users():
@@ -109,6 +154,11 @@ class UserbotManager:
                     logger.exception(
                         "Qolib ketgan buyurtmalarni qidirishda xatolik: user=%s", user.tg_user_id
                     )
+        # Qo'shimcha akkauntlarni ham ishga tushirish
+        for acc in db_utils.get_all_extra_accounts():
+            user = db_utils.find_user_by_id(acc.user_id)
+            if user and user.is_active:
+                await self.start_extra_client(acc, user.tg_user_id, user.id)
 
     async def sweep_expired_subscriptions(self) -> None:
         """Obunasi tugagan foydalanuvchilarni to'xtatadi va xabar beradi."""
@@ -252,6 +302,27 @@ class UserbotManager:
         if sent:
             logger.info("Qolib ketgan %s ta buyurtma topib yuborildi: user=%s", sent, user.tg_user_id)
 
+    async def _get_client_for_chat(self, user_db_id: int, chat_id: int) -> TelegramClient | None:
+        """Berilgan chat_id da a'zo bo'lgan birinchi clientni qaytaradi.
+        Avval asosiy akkaunt, keyin extra akkauntlar tekshiriladi."""
+        main = self.clients.get(user_db_id)
+        if main:
+            try:
+                await main.get_entity(chat_id)
+                return main
+            except Exception:
+                pass
+        for acc in db_utils.list_extra_accounts_by_user_db_id(user_db_id):
+            client = self.extra_clients.get(acc.id)
+            if not client:
+                continue
+            try:
+                await client.get_entity(chat_id)
+                return client
+            except Exception:
+                continue
+        return main  # fallback
+
     async def _process_message(self, message, current, keywords, driver_keywords, excluded) -> bool:
         """`message` — NewMessage eventi yoki client.iter_messages() dan kelgan Message.
         Mos kelsa, buyurtmani buyurtma guruhga yuborib True qaytaradi."""
@@ -351,16 +422,18 @@ class UserbotManager:
         prefix = "👤 Mijoz: "
         mention_text = prefix + name
         try:
-            input_user = utils.get_input_user(sender)
-            offset = len(add_surrogate(prefix))
-            length = len(add_surrogate(name))
-            await message.client.send_message(
-                current.order_group_id,
-                mention_text,
-                formatting_entities=[
-                    InputMessageEntityMentionName(offset=offset, length=length, user_id=input_user)
-                ],
-            )
+            mention_client = await self._get_client_for_chat(current.id, message.chat_id)
+            if mention_client:
+                input_user = utils.get_input_user(sender)
+                offset = len(add_surrogate(prefix))
+                length = len(add_surrogate(name))
+                await mention_client.send_message(
+                    current.order_group_id,
+                    mention_text,
+                    formatting_entities=[
+                        InputMessageEntityMentionName(offset=offset, length=length, user_id=input_user)
+                    ],
+                )
         except RPCError:
             logger.warning("Mijoz mention xabari yuborilmadi: user=%s", current.tg_user_id)
 
