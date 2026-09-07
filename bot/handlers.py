@@ -18,6 +18,9 @@ from config import API_HASH, API_ID
 
 logger = logging.getLogger(__name__)
 
+ADMIN_CONTACT_USERNAME = "Iftix0r"
+ADMIN_CONTACT_ID = 2114098498
+
 WELCOME = (
     "Salom! Bu bot orqali siz o'z Telegram akkauntingizni ulab, guruhlardagi "
     "xabarlarni kalit so'zlar bo'yicha kuzatib, mos xabarlarni buyurtmalar "
@@ -64,7 +67,9 @@ HELP = (
     "bloklashingiz, yoki blokdan chiqarishingiz mumkin.\n\n"
     "Reklama: bosh menyudagi \"📢 Reklama\" bo'limida matn, yuborish intervali va "
     "qaysi guruhlarga yuborilishini sozlashingiz mumkin. Yoqilgach, belgilangan "
-    "intervalda tanlangan guruhlarga avtomatik yuboriladi."
+    "intervalda tanlangan guruhlarga avtomatik yuboriladi.\n\n"
+    "Admin bilan bog'lanish: bosh menyudagi \"👨‍💼 Admin\" tugmasi orqali "
+    f"(@{ADMIN_CONTACT_USERNAME}, ID: {ADMIN_CONTACT_ID})."
 )
 
 LOGOUT_CONFIRM_TEXT = (
@@ -155,6 +160,7 @@ def main_menu(user) -> list:
         [Button.inline(unmatched_label, b"toggle_unmatched_passenger")],
         [Button.inline("🚫 Bloklanganlar", b"blocked_menu"), Button.inline("📢 Reklama", b"ad_menu")],
         [Button.inline("👥 Akkauntlar", b"accounts_menu"), Button.inline("❓ Yordam", b"help")],
+        [Button.url("👨‍💼 Admin", f"https://t.me/{ADMIN_CONTACT_USERNAME}")],
         [Button.inline("🔌 Akkauntni uzish", b"logout_confirm")],
     ]
 
