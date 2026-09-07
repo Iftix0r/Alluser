@@ -456,4 +456,5 @@ class UserbotManager:
         except RPCError:
             logger.warning("Mijoz mention xabari yuborilmadi: user=%s", current.tg_user_id)
 
+        await asyncio.to_thread(db_utils.log_order, current.id)
         return True

@@ -40,6 +40,7 @@ class User(Base):
     ad_target_groups = relationship("AdTargetGroup", back_populates="user", cascade="all, delete-orphan")
     extra_accounts = relationship("ExtraAccount", back_populates="user", cascade="all, delete-orphan")
     extra_order_groups = relationship("ExtraOrderGroup", back_populates="user", cascade="all, delete-orphan")
+    order_logs = relationship("OrderLog", back_populates="user", cascade="all, delete-orphan")
 
 
 class Keyword(Base):
@@ -120,6 +121,18 @@ class ExtraOrderGroup(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="extra_order_groups")
+
+
+class OrderLog(Base):
+    """Har bir muvaffaqiyatli yuborilgan buyurtma uchun bitta yozuv — statistika uchun."""
+
+    __tablename__ = "order_logs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="order_logs")
 
 
 class ExtraAccount(Base):

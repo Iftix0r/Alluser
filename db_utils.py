@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+from sqlalchemy import func
+
 from crypto_utils import encrypt_session
 from database import SessionLocal
 from default_keywords import DEFAULT_DRIVER_KEYWORDS, DEFAULT_PASSENGER_KEYWORDS
@@ -12,6 +14,7 @@ from models import (
     ExtraAccount,
     ExtraOrderGroup,
     Keyword,
+    OrderLog,
     User,
 )
 
@@ -21,6 +24,8 @@ MAX_AD_TEXT_LENGTH = 1000
 MIN_AD_INTERVAL_MINUTES = 15
 DEFAULT_AD_INTERVAL_MINUTES = 60
 MAX_EXTRA_ORDER_GROUPS = 5
+UNLIMITED_SUBSCRIPTION_DAYS = 3650
+UNLIMITED_DISPLAY_THRESHOLD_DAYS = 3000
 _STALE_DRIVER_KEYWORDS = {"taksi"}
 
 
@@ -179,6 +184,42 @@ def is_subscription_active(user) -> bool:
     return bool(user.subscription_expires_at and user.subscription_expires_at > datetime.utcnow())
 
 
+def set_unlimited_subscription(tg_user_id: int) -> User | None:
+    """Foydalanuvchiga muddatsiz (amalda ~10 yillik) obuna beradi."""
+    return extend_subscription(tg_user_id, UNLIMITED_SUBSCRIPTION_DAYS)
+
+
+def revoke_subscription(tg_user_id: int) -> User | None:
+    """Obunani darhol bekor qiladi (muddatini hozirgi vaqtga o'rnatadi)."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return None
+        user.subscription_expires_at = datetime.utcnow()
+        db.commit()
+        db.refresh(user)
+        db.expunge(user)
+        return user
+    finally:
+        db.close()
+
+
+def delete_user(user_id: int) -> bool:
+    """Foydalanuvchini va unga tegishli barcha ma'lumotlarni (kalit so'zlar, guruhlar,
+    qo'shimcha akkauntlar va h.k.) butunlay o'chiradi. Qaytarib bo'lmaydi."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            return False
+        db.delete(user)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
 def format_subscription_status(user) -> str:
     if not user.subscription_expires_at:
         return "obuna yo'q"
@@ -187,6 +228,8 @@ def format_subscription_status(user) -> str:
     if seconds_left <= 0:
         return "muddati tugagan"
     days = delta.days
+    if days >= UNLIMITED_DISPLAY_THRESHOLD_DAYS:
+        return "♾ cheksiz"
     if days > 0:
         return f"{days} kun qoldi"
     hours = delta.seconds // 3600
@@ -716,6 +759,55 @@ def get_extra_order_group_ids(user_id: int) -> list[int]:
     try:
         rows = db.query(ExtraOrderGroup.chat_id).filter_by(user_id=user_id).all()
         return [row[0] for row in rows]
+    finally:
+        db.close()
+
+
+def log_order(user_id: int) -> None:
+    db = SessionLocal()
+    try:
+        db.add(OrderLog(user_id=user_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def count_orders(user_id: int, since: datetime | None = None) -> int:
+    db = SessionLocal()
+    try:
+        q = db.query(OrderLog).filter_by(user_id=user_id)
+        if since:
+            q = q.filter(OrderLog.created_at >= since)
+        return q.count()
+    finally:
+        db.close()
+
+
+def get_global_order_stats() -> dict:
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        today_start = datetime(now.year, now.month, now.day)
+        week_start = now - timedelta(days=7)
+        return {
+            "total": db.query(OrderLog).count(),
+            "today": db.query(OrderLog).filter(OrderLog.created_at >= today_start).count(),
+            "week": db.query(OrderLog).filter(OrderLog.created_at >= week_start).count(),
+        }
+    finally:
+        db.close()
+
+
+def get_top_order_users(limit: int = 5, since: datetime | None = None) -> list[tuple[int, int]]:
+    """Eng ko'p buyurtma qabul qilgan foydalanuvchilarni (users.id, buyurtmalar soni)
+    tartibida qaytaradi."""
+    db = SessionLocal()
+    try:
+        q = db.query(OrderLog.user_id, func.count(OrderLog.id).label("cnt"))
+        if since:
+            q = q.filter(OrderLog.created_at >= since)
+        rows = q.group_by(OrderLog.user_id).order_by(func.count(OrderLog.id).desc()).limit(limit).all()
+        return [(row[0], row[1]) for row in rows]
     finally:
         db.close()
 
