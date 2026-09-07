@@ -42,16 +42,26 @@ HELP = (
     "/pause - kuzatishni to'xtatish\n"
     "/resume - kuzatishni davom ettirish\n"
     "/removegroup - buyurtma guruhni uzish\n"
+    "/addordergroup - (guruh ichida) shu guruhni QO'SHIMCHA buyurtma guruhi qilib qo'shish\n"
+    "/removeordergroup - (guruh ichida) shu guruhni qo'shimcha buyurtma guruhlaridan olib tashlash\n"
     "/groups - kuzatiladigan guruhlarni boshqarish\n"
     "/logout - akkauntni uzish\n\n"
     "Buyurtmalar guruhini ulash uchun bosh menyudagi \"📦 Buyurtma guruhi\" → "
     "\"➕ Guruhga qo'shish\" tugmasini bosing va ro'yxatdan guruhni tanlang — avtomatik ulanadi.\n\n"
+    "Bir nechta buyurtma guruhi: asosiy guruhdan tashqari yana \"➕ Qo'shimcha guruh\" "
+    f"orqali (ko'pi bilan {db_utils.MAX_EXTRA_ORDER_GROUPS} tagacha) qo'shishingiz mumkin — "
+    "har bir buyurtma barcha ulangan guruhlarga bir vaqtda yuboriladi.\n\n"
     "Haydovchi so'zlari: agar xabarda shu so'zlardan biri bo'lsa, xabar buyurtma "
     "sifatida olinmaydi (masalan, haydovchilarning o'zaro yozishuvlarini chiqarib "
     "tashlash uchun).\n\n"
+    "Ko'plab kalit so'z qo'shish/eksport: kalit so'z qo'shishda bir nechtasini vergul "
+    "yoki alohida qatorlarga yozib, yoki katta ro'yxatni .txt fayl qilib yuborishingiz "
+    "mumkin. \"📤 Export\" tugmasi orqali mavjud ro'yxatni nusxalab boshqa akkauntga ham "
+    "qo'llash mumkin.\n\n"
     "Bloklash: buyurtma xabaridagi \"🚫 Bloklash\" tugmasini bossangiz, o'sha xabar "
     "buyurtma guruhidan o'chadi va o'sha mijozdan boshqa buyurtmalar kelmaydi. "
-    "Bosh menyudagi \"🚫 Bloklanganlar\" bo'limidan blokdan chiqarishingiz mumkin.\n\n"
+    "Bosh menyudagi \"🚫 Bloklanganlar\" bo'limida ID/username orqali oldindan ham "
+    "bloklashingiz, yoki blokdan chiqarishingiz mumkin.\n\n"
     "Reklama: bosh menyudagi \"📢 Reklama\" bo'limida matn, yuborish intervali va "
     "qaysi guruhlarga yuborilishini sozlashingiz mumkin. Yoqilgach, belgilangan "
     "intervalda tanlangan guruhlarga avtomatik yuboriladi."
@@ -83,7 +93,10 @@ SUBSCRIPTION_EXPIRED_TEXT = (
 
 
 def parse_words(raw: str) -> list[str]:
-    words = [w.strip() for w in raw.split(",")]
+    """Vergul yoki qator (yangi satr) bilan ajratilgan so'zlarni ajratib oladi —
+    shu tufayli katta ro'yxatni bittada, har birini alohida qatorga yozib ham
+    qo'shish mumkin (bulk import)."""
+    words = [w.strip() for chunk in raw.replace("\r", "").split("\n") for w in chunk.split(",")]
     seen = set()
     result = []
     for w in words:
@@ -91,6 +104,21 @@ def parse_words(raw: str) -> list[str]:
             seen.add(w.lower())
             result.append(w)
     return result
+
+
+async def extract_words_from_response(resp) -> list[str]:
+    """Javobda matn fayl (.txt) bo'lsa uni yuklab olib o'qiydi, aks holda oddiy
+    xabar matnidan so'zlarni ajratib oladi (bulk import uchun)."""
+    if resp.document:
+        try:
+            data = await resp.download_media(bytes)
+            text = data.decode("utf-8", errors="ignore")
+        except Exception:
+            logger.warning("Yuklangan faylni o'qib bo'lmadi")
+            text = resp.raw_text or ""
+    else:
+        text = resp.raw_text or ""
+    return parse_words(text)
 
 
 def summarize_add_results(results: dict[str, bool]) -> str:
@@ -134,7 +162,7 @@ def main_menu(user) -> list:
 def keyword_submenu() -> list:
     return [
         [Button.inline("➕ Qo'shish", b"add_kw"), Button.inline("➖ O'chirish", b"del_kw")],
-        [Button.inline("📋 Ro'yxat", b"list_kw")],
+        [Button.inline("📋 Ro'yxat", b"list_kw"), Button.inline("📤 Export", b"export_kw")],
         [Button.inline("« Bosh menyu", b"menu")],
     ]
 
@@ -142,27 +170,60 @@ def keyword_submenu() -> list:
 def driver_keyword_submenu() -> list:
     return [
         [Button.inline("➕ Qo'shish", b"add_dkw"), Button.inline("➖ O'chirish", b"del_dkw")],
-        [Button.inline("📋 Ro'yxat", b"list_dkw")],
+        [Button.inline("📋 Ro'yxat", b"list_dkw"), Button.inline("📤 Export", b"export_dkw")],
         [Button.inline("« Bosh menyu", b"menu")],
     ]
+
+
+def export_words_text(words: list[str], empty_label: str) -> str:
+    if not words:
+        return empty_label
+    return (
+        "📤 Nusxa oling va boshqa akkauntga import qilish uchun ishlating "
+        "(vergul bilan ajratilgan, yoki .txt fayl qilib ham yuborishingiz mumkin):\n\n"
+        + ", ".join(words)
+    )
 
 
 def order_group_submenu(tg_user_id: int, bot_username: str) -> list:
     add_url = f"https://t.me/{bot_username}?startgroup=setgroup_{tg_user_id}"
+    add_extra_url = f"https://t.me/{bot_username}?startgroup=addordergroup_{tg_user_id}"
     return [
         [Button.url("➕ Guruhga qo'shish", add_url)],
         [Button.inline("🔗 ID orqali ulash", b"set_group"), Button.inline("🗑 Uzish", b"remove_group")],
+        [Button.url("➕ Qo'shimcha guruh", add_extra_url), Button.inline("🗂 Qo'shimcha guruhlar", b"extra_groups_menu")],
         [Button.inline("« Bosh menyu", b"menu")],
     ]
+
+
+def extra_order_groups_view(user_id: int) -> tuple[str, list]:
+    groups = db_utils.list_extra_order_groups(user_id)
+    if not groups:
+        text = (
+            "🗂 Qo'shimcha buyurtma guruhlari yo'q.\n\n"
+            "Qo'shish uchun \"➕ Qo'shimcha guruh\" tugmasini bosib, botni kerakli guruhga qo'shing "
+            f"(ko'pi bilan {db_utils.MAX_EXTRA_ORDER_GROUPS} ta)."
+        )
+        return text, [[Button.inline("« Orqaga", b"group_menu")]]
+    lines = ["🗂 Qo'shimcha buyurtma guruhlari (buyurtmalar asosiy guruh bilan birga shu yerlarga ham yuboriladi):"]
+    buttons = []
+    for g in groups:
+        label = g.title or str(g.chat_id)
+        lines.append(f"- {label}")
+        buttons.append([Button.inline(f"🗑 {label}"[:64], f"delordergroup:{g.id}".encode())])
+    buttons.append([Button.inline("« Orqaga", b"group_menu")])
+    return "\n".join(lines), buttons
 
 
 def format_status(user) -> str:
     kws = db_utils.list_keywords(user.tg_user_id)
     dkws = db_utils.list_driver_keywords(user.tg_user_id)
+    extra_groups = db_utils.list_extra_order_groups(user.id)
     return "\n".join(
         [
             f"📱 Telefon: {user.phone or '-'}",
             f"📦 Buyurtma guruh: {user.order_group_id or 'ulanmagan'}",
+            f"🗂 Qo'shimcha buyurtma guruhlari: {len(extra_groups)} ta",
             f"✅ Faol: {'ha' if user.is_active else 'yoq'}",
             f"🧭 Aniqlanmagan xabarlarni yo'lovchi deb qabul qilish: {'ha' if user.assume_passenger_if_unmatched else 'yoq'}",
             f"💳 Obuna: {db_utils.format_subscription_status(user)}",
@@ -205,14 +266,18 @@ async def send_groups_list(respond, manager, user) -> None:
 
 def blocked_list_view(tg_user_id: int) -> tuple[str, list]:
     blocked = db_utils.list_blocked_senders(tg_user_id)
-    if not blocked:
-        return "🚫 Bloklangan foydalanuvchilar yo'q.", [[Button.inline("« Bosh menyu", b"menu")]]
     buttons = [
         [Button.inline(f"❌ {b.sender_name or b.sender_id}"[:64], f"unblock:{b.sender_id}".encode())]
         for b in blocked
     ]
+    buttons.append([Button.inline("➕ ID/username orqali bloklash", b"block_add")])
     buttons.append([Button.inline("« Bosh menyu", b"menu")])
-    return "🚫 Bloklangan foydalanuvchilar (blokdan chiqarish uchun bosing):", buttons
+    text = (
+        "🚫 Bloklangan foydalanuvchilar (blokdan chiqarish uchun bosing):"
+        if blocked
+        else "🚫 Bloklangan foydalanuvchilar yo'q."
+    )
+    return text, buttons
 
 
 def ad_menu_view(user) -> tuple[str, list]:
@@ -414,6 +479,58 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             else "Xatolik: avval akkauntni ulang."
         )
 
+    @bot_client.on(events.NewMessage(pattern="/addordergroup", func=lambda e: e.is_group))
+    async def addordergroup_handler(event):
+        user = db_utils.get_user(event.sender_id)
+        if not user or not user.session_string:
+            await event.respond("Avval botga shaxsiy chatda /start yuborib akkauntingizni ulang.")
+            return
+        chat = await event.get_chat()
+        title = getattr(chat, "title", None)
+        ok = db_utils.add_extra_order_group(user.id, event.chat_id, title)
+        if ok:
+            await event.respond("✅ Bu guruh qo'shimcha buyurtma guruhi sifatida qo'shildi.")
+        else:
+            await event.respond(
+                "❌ Qo'shib bo'lmadi (allaqachon qo'shilgan yoki ko'pi bilan "
+                f"{db_utils.MAX_EXTRA_ORDER_GROUPS} ta guruh qo'shish mumkin)."
+            )
+
+    @bot_client.on(events.NewMessage(pattern="/removeordergroup", func=lambda e: e.is_group))
+    async def removeordergroup_handler(event):
+        user = db_utils.get_user(event.sender_id)
+        if not user or not user.session_string:
+            await event.respond("Avval botga shaxsiy chatda /start yuborib akkauntingizni ulang.")
+            return
+        match = next(
+            (g for g in db_utils.list_extra_order_groups(user.id) if g.chat_id == event.chat_id), None
+        )
+        if not match:
+            await event.respond("Bu guruh qo'shimcha buyurtma guruhi sifatida ulanmagan.")
+            return
+        db_utils.remove_extra_order_group(user.id, match.id)
+        await event.respond("✅ Bu guruh qo'shimcha buyurtma guruhlar ro'yxatidan olib tashlandi.")
+
+    @bot_client.on(
+        events.NewMessage(pattern=r"^/start(?:@\w+)?\s+addordergroup_(\d+)$", func=lambda e: e.is_group)
+    )
+    async def add_order_group_deeplink_handler(event):
+        tg_user_id = int(event.pattern_match.group(1))
+        user = db_utils.get_user(tg_user_id)
+        if not user or not user.session_string:
+            await event.respond("Bu guruhni ulashga urinilgan akkaunt topilmadi yoki ulanmagan.")
+            return
+        chat = await event.get_chat()
+        title = getattr(chat, "title", None)
+        ok = db_utils.add_extra_order_group(user.id, event.chat_id, title)
+        if ok:
+            await event.respond("✅ Bu guruh qo'shimcha buyurtma guruhi sifatida qo'shildi.")
+        else:
+            await event.respond(
+                "❌ Qo'shib bo'lmadi (allaqachon qo'shilgan yoki ko'pi bilan "
+                f"{db_utils.MAX_EXTRA_ORDER_GROUPS} ta guruh qo'shish mumkin)."
+            )
+
     @bot_client.on(events.CallbackQuery(func=lambda e: e.is_group and e.data == b"order_claim"))
     async def order_claim_handler(event):
         key = (event.chat_id, event.message_id)
@@ -561,20 +678,26 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         text = "Kalit so'zlar:\n" + "\n".join(f"- {w}" for w in kws) if kws else "Kalit so'zlar qo'shilmagan."
         await event.respond(text)
 
+    elif data == b"export_kw":
+        kws = db_utils.list_keywords(tg_user_id)
+        await event.answer()
+        await event.respond(export_words_text(kws, "Kalit so'zlar qo'shilmagan."))
+
     elif data == b"add_kw":
         await event.answer()
         try:
             async with bot_client.conversation(event.chat_id, timeout=120) as conv:
                 await conv.send_message(
                     "Qo'shmoqchi bo'lgan kalit so'z(lar)ni yuboring. Bir nechtasini vergul "
-                    "bilan ajratib yozishingiz mumkin (masalan: taksi, karta, dostavka):"
+                    "yoki alohida qatorlarga yozib yuborishingiz mumkin (masalan: taksi, karta, "
+                    "dostavka), yoki katta ro'yxatni .txt fayl qilib yuboring (bulk import):"
                 )
                 try:
                     resp = await conv.get_response()
                 except asyncio.TimeoutError:
                     await conv.send_message("Vaqt tugadi.")
                     return
-                words = parse_words(resp.raw_text)
+                words = await extract_words_from_response(resp)
                 if not words:
                     await conv.send_message(ADD_KEYWORD_FAIL_TEXT)
                     return
@@ -604,14 +727,15 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
             async with bot_client.conversation(event.chat_id, timeout=120) as conv:
                 await conv.send_message(
                     "O'chirmoqchi bo'lgan kalit so'z(lar)ni yuboring. Bir nechtasini vergul "
-                    "bilan ajratib yozishingiz mumkin (masalan: taksi, karta):"
+                    "yoki alohida qatorlarga yozib, yoki .txt fayl qilib yuborishingiz mumkin "
+                    "(masalan: taksi, karta):"
                 )
                 try:
                     resp = await conv.get_response()
                 except asyncio.TimeoutError:
                     await conv.send_message("Vaqt tugadi.")
                     return
-                words = parse_words(resp.raw_text)
+                words = await extract_words_from_response(resp)
                 if not words:
                     await conv.send_message("Bunday kalit so'z topilmadi.")
                     return
@@ -643,13 +767,19 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         )
         await event.respond(text)
 
+    elif data == b"export_dkw":
+        dkws = db_utils.list_driver_keywords(tg_user_id)
+        await event.answer()
+        await event.respond(export_words_text(dkws, "Haydovchi so'zlari qo'shilmagan."))
+
     elif data == b"add_dkw":
         await event.answer()
         try:
             async with bot_client.conversation(event.chat_id, timeout=120) as conv:
                 await conv.send_message(
                     "Qo'shmoqchi bo'lgan haydovchi so'z(lar)ni yuboring. Bir nechtasini "
-                    "vergul bilan ajratib yozishingiz mumkin (masalan: bo'shman, band).\n\n"
+                    "vergul yoki alohida qatorlarga yozib, yoki .txt fayl qilib yuborishingiz "
+                    "mumkin (masalan: bo'shman, band).\n\n"
                     "Bu so'zlardan biri xabarda uchrasa, o'sha xabar buyurtma sifatida olinmaydi."
                 )
                 try:
@@ -657,7 +787,7 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
                 except asyncio.TimeoutError:
                     await conv.send_message("Vaqt tugadi.")
                     return
-                words = parse_words(resp.raw_text)
+                words = await extract_words_from_response(resp)
                 if not words:
                     await conv.send_message(ADD_KEYWORD_FAIL_TEXT)
                     return
@@ -687,14 +817,14 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
             async with bot_client.conversation(event.chat_id, timeout=120) as conv:
                 await conv.send_message(
                     "O'chirmoqchi bo'lgan haydovchi so'z(lar)ni yuboring. Bir nechtasini "
-                    "vergul bilan ajratib yozishingiz mumkin:"
+                    "vergul yoki alohida qatorlarga yozib, yoki .txt fayl qilib yuborishingiz mumkin:"
                 )
                 try:
                     resp = await conv.get_response()
                 except asyncio.TimeoutError:
                     await conv.send_message("Vaqt tugadi.")
                     return
-                words = parse_words(resp.raw_text)
+                words = await extract_words_from_response(resp)
                 if not words:
                     await conv.send_message("Bunday haydovchi so'zi topilmadi.")
                     return
@@ -736,6 +866,18 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         except AlreadyInConversationError:
             await event.respond(BUSY_TEXT)
 
+    elif data == b"extra_groups_menu":
+        await event.answer()
+        text, buttons = extra_order_groups_view(user.id)
+        await event.edit(text, buttons=buttons)
+
+    elif data.startswith(b"delordergroup:"):
+        group_id = int(data[len(b"delordergroup:"):])
+        db_utils.remove_extra_order_group(user.id, group_id)
+        await event.answer("🗑 O'chirildi.")
+        text, buttons = extra_order_groups_view(user.id)
+        await event.edit(text, buttons=buttons)
+
     elif data == b"groups_menu":
         await event.answer()
         await send_groups_list(event.respond, manager, user)
@@ -765,6 +907,40 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         await event.answer("✅ Blokdan chiqarildi." if ok else "Topilmadi.")
         text, buttons = blocked_list_view(tg_user_id)
         await event.edit(text, buttons=buttons)
+
+    elif data == b"block_add":
+        await event.answer()
+        try:
+            async with bot_client.conversation(event.chat_id, timeout=120) as conv:
+                await conv.send_message(
+                    "Bloklamoqchi bo'lgan foydalanuvchining Telegram ID raqami yoki @username'ini "
+                    "yuboring (u hali buyurtma yubormagan bo'lsa ham, oldindan bloklab qo'yishingiz mumkin):"
+                )
+                try:
+                    resp = await conv.get_response()
+                except asyncio.TimeoutError:
+                    await conv.send_message("Vaqt tugadi.")
+                    return
+                raw = resp.raw_text.strip()
+                client = manager.clients.get(user.id)
+                if not client:
+                    await conv.send_message("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
+                    return
+                target = int(raw) if raw.lstrip("-").isdigit() else raw.lstrip("@")
+                try:
+                    entity = await client.get_entity(target)
+                except Exception:
+                    await conv.send_message(
+                        "❌ Foydalanuvchi topilmadi. ID yoki @username to'g'ri ekanini tekshiring."
+                    )
+                    return
+                name = " ".join(
+                    filter(None, [getattr(entity, "first_name", None), getattr(entity, "last_name", None)])
+                ) or raw
+                ok = db_utils.block_sender(tg_user_id, entity.id, name)
+                await conv.send_message(f"✅ Bloklandi: {name}" if ok else "⚠️ Bu foydalanuvchi allaqachon bloklangan.")
+        except AlreadyInConversationError:
+            await event.respond(BUSY_TEXT)
 
     elif data == b"ad_menu":
         await event.answer()

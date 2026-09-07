@@ -92,7 +92,6 @@ DEFAULT_DRIVER_KEYWORDS = [
     'olib ketaman',
     'haydovchiman',
     'mashina bor',
-    'taksi',
     '1 ta kam',
     '2 ta kam',
     '3 ta kam',

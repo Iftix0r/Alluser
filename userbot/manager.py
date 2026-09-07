@@ -404,6 +404,9 @@ class UserbotManager:
             [Button.inline("🚫 Bloklash", f"block:{sender.id}:{current.id}".encode())],
         ]
 
+        extra_group_ids = await asyncio.to_thread(db_utils.get_extra_order_group_ids, current.id)
+        destination_ids = [current.order_group_id, *extra_group_ids]
+
         try:
             await self.bot_client.send_message(
                 current.order_group_id, order_text, buttons=buttons, link_preview=False, parse_mode="html"
@@ -416,6 +419,16 @@ class UserbotManager:
             )
             return False
 
+        for extra_chat_id in extra_group_ids:
+            try:
+                await self.bot_client.send_message(
+                    extra_chat_id, order_text, buttons=buttons, link_preview=False, parse_mode="html"
+                )
+            except RPCError:
+                logger.warning(
+                    "Qo'shimcha buyurtma guruhga yuborilmadi: user=%s, chat=%s", current.tg_user_id, extra_chat_id
+                )
+
         # Bot mijozni to'g'ridan-to'g'ri mention qila olmaydi (u bilan aloqada bo'lmagani
         # uchun access_hash yo'q). Akkaunt esa mijoz turgan guruhda a'zo bo'lgani uchun
         # haqiqiy bosiladigan mention yubora oladi.
@@ -427,13 +440,19 @@ class UserbotManager:
                 input_user = utils.get_input_user(sender)
                 offset = len(add_surrogate(prefix))
                 length = len(add_surrogate(name))
-                await mention_client.send_message(
-                    current.order_group_id,
-                    mention_text,
-                    formatting_entities=[
-                        InputMessageEntityMentionName(offset=offset, length=length, user_id=input_user)
-                    ],
-                )
+                for dest_chat_id in destination_ids:
+                    try:
+                        await mention_client.send_message(
+                            dest_chat_id,
+                            mention_text,
+                            formatting_entities=[
+                                InputMessageEntityMentionName(offset=offset, length=length, user_id=input_user)
+                            ],
+                        )
+                    except RPCError:
+                        logger.warning(
+                            "Mijoz mention xabari yuborilmadi: user=%s, chat=%s", current.tg_user_id, dest_chat_id
+                        )
         except RPCError:
             logger.warning("Mijoz mention xabari yuborilmadi: user=%s", current.tg_user_id)
 

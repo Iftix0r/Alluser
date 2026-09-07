@@ -39,6 +39,7 @@ class User(Base):
     )
     ad_target_groups = relationship("AdTargetGroup", back_populates="user", cascade="all, delete-orphan")
     extra_accounts = relationship("ExtraAccount", back_populates="user", cascade="all, delete-orphan")
+    extra_order_groups = relationship("ExtraOrderGroup", back_populates="user", cascade="all, delete-orphan")
 
 
 class Keyword(Base):
@@ -106,6 +107,19 @@ class AdTargetGroup(Base):
     chat_id = Column(BigInteger, nullable=False)
 
     user = relationship("User", back_populates="ad_target_groups")
+
+
+class ExtraOrderGroup(Base):
+    __tablename__ = "extra_order_groups"
+    __table_args__ = (UniqueConstraint("user_id", "chat_id", name="uq_extra_order_user_chat"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    chat_id = Column(BigInteger, nullable=False)
+    title = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="extra_order_groups")
 
 
 class ExtraAccount(Base):

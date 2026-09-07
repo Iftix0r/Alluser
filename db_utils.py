@@ -3,13 +3,25 @@ from datetime import datetime, timedelta
 from crypto_utils import encrypt_session
 from database import SessionLocal
 from default_keywords import DEFAULT_DRIVER_KEYWORDS, DEFAULT_PASSENGER_KEYWORDS
-from models import AdSettings, AdTargetGroup, BlockedSender, DriverKeyword, ExcludedGroup, ExtraAccount, Keyword, User
+from models import (
+    AdSettings,
+    AdTargetGroup,
+    BlockedSender,
+    DriverKeyword,
+    ExcludedGroup,
+    ExtraAccount,
+    ExtraOrderGroup,
+    Keyword,
+    User,
+)
 
 MAX_KEYWORD_LENGTH = 200
 TRIAL_DAYS = 3
 MAX_AD_TEXT_LENGTH = 1000
 MIN_AD_INTERVAL_MINUTES = 15
 DEFAULT_AD_INTERVAL_MINUTES = 60
+MAX_EXTRA_ORDER_GROUPS = 5
+_STALE_DRIVER_KEYWORDS = {"taksi"}
 
 
 def get_user(tg_user_id: int) -> User | None:
@@ -61,6 +73,23 @@ def seed_default_keywords_for_existing_users() -> int:
             user.default_keywords_seeded = True
         db.commit()
         return seeded
+    finally:
+        db.close()
+
+
+def remove_stale_driver_keywords() -> int:
+    """"taksi" so'zi ilgari xato ravishda ham yo'lovchi, ham haydovchi kalit so'zi
+    sifatida default ro'yxatga qo'shilgan edi — natijada "taksi" so'zi bor deyarli
+    barcha haqiqiy buyurtmalar haydovchi xabari deb chiqarib tashlanardi. Bu allaqachon
+    bazaga yozilgan eski yozuvlarni tozalaydi (o'chirilgan qatorlar sonini qaytaradi)."""
+    db = SessionLocal()
+    try:
+        rows = db.query(DriverKeyword).filter(DriverKeyword.word.in_(_STALE_DRIVER_KEYWORDS)).all()
+        count = len(rows)
+        for row in rows:
+            db.delete(row)
+        db.commit()
+        return count
     finally:
         db.close()
 
@@ -637,6 +666,56 @@ def get_all_extra_accounts() -> list:
         accs = db.query(ExtraAccount).all()
         db.expunge_all()
         return accs
+    finally:
+        db.close()
+
+
+def add_extra_order_group(user_id: int, chat_id: int, title: str | None = None) -> bool:
+    """Asosiy buyurtma guruhiga qo'shimcha ravishda buyurtma yuboriladigan guruh qo'shadi.
+    Ko'pi bilan MAX_EXTRA_ORDER_GROUPS ta guruh qo'shish mumkin."""
+    db = SessionLocal()
+    try:
+        count = db.query(ExtraOrderGroup).filter_by(user_id=user_id).count()
+        if count >= MAX_EXTRA_ORDER_GROUPS:
+            return False
+        exists = db.query(ExtraOrderGroup).filter_by(user_id=user_id, chat_id=chat_id).first()
+        if exists:
+            return False
+        db.add(ExtraOrderGroup(user_id=user_id, chat_id=chat_id, title=title))
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def remove_extra_order_group(user_id: int, group_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        row = db.query(ExtraOrderGroup).filter_by(id=group_id, user_id=user_id).first()
+        if not row:
+            return False
+        db.delete(row)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def list_extra_order_groups(user_id: int) -> list[ExtraOrderGroup]:
+    db = SessionLocal()
+    try:
+        rows = db.query(ExtraOrderGroup).filter_by(user_id=user_id).all()
+        db.expunge_all()
+        return rows
+    finally:
+        db.close()
+
+
+def get_extra_order_group_ids(user_id: int) -> list[int]:
+    db = SessionLocal()
+    try:
+        rows = db.query(ExtraOrderGroup.chat_id).filter_by(user_id=user_id).all()
+        return [row[0] for row in rows]
     finally:
         db.close()
 

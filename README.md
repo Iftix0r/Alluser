@@ -8,6 +8,9 @@ Telegram userbot tizimi: foydalanuvchilar botga `/start` bosib o'z Telegram akka
 - **Tugmali menyu**: kalit so'z qo'shish/o'chirish, holatni ko'rish, pauza/davom ettirish, guruhlarni boshqarish — hammasi inline tugmalar orqali (matnli buyruqlar ham ishlaydi).
 - **Kalit so'z bo'yicha aniqlash**: xabar matnidan kalit so'z va telefon raqami (regex bilan) ajratib olinadi.
 - **Guruhlarni tanlab kuzatish**: `/groups` orqali istalmagan guruhlarni kuzatishdan chiqarib qo'yish mumkin.
+- **Bir nechta buyurtma guruhi**: asosiy guruhdan tashqari yana bir nechta (ko'pi bilan 5 ta) qo'shimcha guruhga bir vaqtda buyurtma yuborish mumkin.
+- **Ko'plab kalit so'z import/export**: kalit so'zlarni vergul, alohida qatorlar yoki `.txt` fayl orqali bittada ko'plab qo'shish, va mavjud ro'yxatni nusxalash uchun eksport qilish mumkin.
+- **Oldindan bloklash**: hali buyurtma yubormagan foydalanuvchini ham Telegram ID yoki username orqali oldindan bloklab qo'yish mumkin.
 - **Flood-himoya**: bir foydalanuvchidan daqiqasiga 20 tadan ortiq buyurtma o'tsa, qolganlari o'tkazib yuboriladi (spam va flood-limitning oldini olish uchun).
 - **Sessiya nazorati**: akkaunt sessiyasi bekor bo'lsa (masalan, boshqa joydan chiqib ketilsa), tizim buni aniqlab, foydalanuvchiga bot orqali xabar beradi.
 - **Akkaunt/guruhni uzish**: `/logout` (tasdiqlash bilan) va `/removegroup` orqali bekor qilish mumkin.
@@ -103,14 +106,16 @@ journalctl -u aluser -f          # loglarni jonli kuzatish
 | `/resume` | Kuzatishni davom ettirish |
 | `/removegroup` | Buyurtmalar guruhini uzish |
 | `/logout` | Akkauntni uzish (tasdiqlash bilan) |
-| `/setgroup` | *(guruh ichida)* shu guruhni buyurtmalar guruhi qilib belgilash |
+| `/setgroup` | *(guruh ichida)* shu guruhni asosiy buyurtmalar guruhi qilib belgilash |
+| `/addordergroup` | *(guruh ichida)* shu guruhni qo'shimcha buyurtma guruhi qilib qo'shish (ko'pi bilan 5 ta) |
+| `/removeordergroup` | *(guruh ichida)* shu guruhni qo'shimcha buyurtma guruhlaridan olib tashlash |
 | `/admin` | *(faqat admin)* admin panelni ochish |
 
 ## Loyiha tuzilishi
 
 ```
 config.py            — .env dan sozlamalarni o'qish
-models.py             — SQLAlchemy modellari (User, Keyword, ExcludedGroup)
+models.py             — SQLAlchemy modellari (User, Keyword, ExcludedGroup, ExtraOrderGroup)
 database.py           — DB engine va sessiya
 db_utils.py            — DB bilan ishlash uchun yordamchi funksiyalar (shu jumladan obuna)
 crypto_utils.py         — session-stringlarni shifrlash/deshifrlash (Fernet)
