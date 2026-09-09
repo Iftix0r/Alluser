@@ -393,11 +393,11 @@ class UserbotManager:
 
         group_row = []
         if chat_username:
-            group_row.append(Button.url(f"📍 {chat_title or 'Guruh'}", f"https://t.me/{chat_username}"))
+            group_row.append(Button.url(f"📍 {chat_title or 'Guruh'}", f"https://t.me/{chat_username}", style="primary"))
         link_row = []
         if chat_username:
-            link_row.append(Button.url("🔗 Xabarga o'tish", f"https://t.me/{chat_username}/{message.id}"))
-        link_row.append(Button.url("👤 Profil", f"tg://user?id={sender.id}"))
+            link_row.append(Button.url("🔗 Xabarga o'tish", f"https://t.me/{chat_username}/{message.id}", style="primary"))
+        link_row.append(Button.url("👤 Profil", f"tg://user?id={sender.id}", style="primary"))
         buttons = [
             *([group_row] if group_row else []),
             link_row,

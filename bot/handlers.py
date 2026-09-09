@@ -77,7 +77,10 @@ LOGOUT_CONFIRM_TEXT = (
     "/start bosishingiz kerak bo'ladi. Davom etasizmi?"
 )
 LOGOUT_CONFIRM_BUTTONS = [
-    [Button.inline("✅ Ha, uzish", b"logout_yes", style="danger"), Button.inline("❌ Bekor qilish", b"logout_no")]
+    [
+        Button.inline("✅ Ha, uzish", b"logout_yes", style="danger"),
+        Button.inline("❌ Bekor qilish", b"logout_no", style="primary"),
+    ]
 ]
 
 SET_GROUP_PROMPT_TEXT = (
@@ -153,16 +156,29 @@ def summarize_remove_results(results: dict[str, bool]) -> str:
 def main_menu(user) -> list:
     active_label = "⏸ Pauza qilish" if user.is_active else "▶️ Davom ettirish"
     active_style = "danger" if user.is_active else "success"
+    unmatched_style = "success" if user.assume_passenger_if_unmatched else "danger"
     unmatched_label = (
         "🧭 Aniqlanmagan: yo'lovchi ✅" if user.assume_passenger_if_unmatched else "🧭 Aniqlanmagan: yo'lovchi ❌"
     )
     return [
-        [Button.inline("🔑 Kalit so'zlar", b"kw_menu"), Button.inline("🚖 Haydovchi so'zlari", b"dkw_menu")],
-        [Button.inline("📦 Buyurtma guruhi", b"group_menu"), Button.inline("🗂 Kuzatiladigan guruhlar", b"groups_menu")],
-        [Button.inline("📊 Holat", b"status"), Button.inline(active_label, b"toggle_active", style=active_style)],
-        [Button.inline(unmatched_label, b"toggle_unmatched_passenger")],
-        [Button.inline("🚫 Bloklanganlar", b"blocked_menu"), Button.inline("📢 Reklama", b"ad_menu")],
-        [Button.inline("👥 Akkauntlar", b"accounts_menu"), Button.inline("❓ Yordam", b"help")],
+        [
+            Button.inline("🔑 Kalit so'zlar", b"kw_menu", style="primary"),
+            Button.inline("🚖 Haydovchi so'zlari", b"dkw_menu", style="primary"),
+        ],
+        [
+            Button.inline("📦 Buyurtma guruhi", b"group_menu", style="primary"),
+            Button.inline("🗂 Kuzatiladigan guruhlar", b"groups_menu", style="primary"),
+        ],
+        [Button.inline("📊 Holat", b"status", style="primary"), Button.inline(active_label, b"toggle_active", style=active_style)],
+        [Button.inline(unmatched_label, b"toggle_unmatched_passenger", style=unmatched_style)],
+        [
+            Button.inline("🚫 Bloklanganlar", b"blocked_menu", style="primary"),
+            Button.inline("📢 Reklama", b"ad_menu", style="primary"),
+        ],
+        [
+            Button.inline("👥 Akkauntlar", b"accounts_menu", style="primary"),
+            Button.inline("❓ Yordam", b"help", style="primary"),
+        ],
         [Button.url("👨‍💼 Admin", f"https://t.me/{ADMIN_CONTACT_USERNAME}", style="primary")],
         [Button.inline("🔌 Akkauntni uzish", b"logout_confirm", style="danger")],
     ]
@@ -171,16 +187,22 @@ def main_menu(user) -> list:
 def keyword_submenu() -> list:
     return [
         [Button.inline("➕ Qo'shish", b"add_kw", style="success"), Button.inline("➖ O'chirish", b"del_kw", style="danger")],
-        [Button.inline("📋 Ro'yxat", b"list_kw"), Button.inline("📤 Export", b"export_kw")],
-        [Button.inline("« Bosh menyu", b"menu")],
+        [
+            Button.inline("📋 Ro'yxat", b"list_kw", style="primary"),
+            Button.inline("📤 Export", b"export_kw", style="primary"),
+        ],
+        [Button.inline("« Bosh menyu", b"menu", style="primary")],
     ]
 
 
 def driver_keyword_submenu() -> list:
     return [
         [Button.inline("➕ Qo'shish", b"add_dkw", style="success"), Button.inline("➖ O'chirish", b"del_dkw", style="danger")],
-        [Button.inline("📋 Ro'yxat", b"list_dkw"), Button.inline("📤 Export", b"export_dkw")],
-        [Button.inline("« Bosh menyu", b"menu")],
+        [
+            Button.inline("📋 Ro'yxat", b"list_dkw", style="primary"),
+            Button.inline("📤 Export", b"export_dkw", style="primary"),
+        ],
+        [Button.inline("« Bosh menyu", b"menu", style="primary")],
     ]
 
 
@@ -199,9 +221,15 @@ def order_group_submenu(tg_user_id: int, bot_username: str) -> list:
     add_extra_url = f"https://t.me/{bot_username}?startgroup=addordergroup_{tg_user_id}"
     return [
         [Button.url("➕ Guruhga qo'shish", add_url, style="success")],
-        [Button.inline("🔗 ID orqali ulash", b"set_group"), Button.inline("🗑 Uzish", b"remove_group", style="danger")],
-        [Button.url("➕ Qo'shimcha guruh", add_extra_url, style="success"), Button.inline("🗂 Qo'shimcha guruhlar", b"extra_groups_menu")],
-        [Button.inline("« Bosh menyu", b"menu")],
+        [
+            Button.inline("🔗 ID orqali ulash", b"set_group", style="primary"),
+            Button.inline("🗑 Uzish", b"remove_group", style="danger"),
+        ],
+        [
+            Button.url("➕ Qo'shimcha guruh", add_extra_url, style="success"),
+            Button.inline("🗂 Qo'shimcha guruhlar", b"extra_groups_menu", style="primary"),
+        ],
+        [Button.inline("« Bosh menyu", b"menu", style="primary")],
     ]
 
 
@@ -213,14 +241,14 @@ def extra_order_groups_view(user_id: int) -> tuple[str, list]:
             "Qo'shish uchun \"➕ Qo'shimcha guruh\" tugmasini bosib, botni kerakli guruhga qo'shing "
             f"(ko'pi bilan {db_utils.MAX_EXTRA_ORDER_GROUPS} ta)."
         )
-        return text, [[Button.inline("« Orqaga", b"group_menu")]]
+        return text, [[Button.inline("« Orqaga", b"group_menu", style="primary")]]
     lines = ["🗂 Qo'shimcha buyurtma guruhlari (buyurtmalar asosiy guruh bilan birga shu yerlarga ham yuboriladi):"]
     buttons = []
     for g in groups:
         label = g.title or str(g.chat_id)
         lines.append(f"- {label}")
         buttons.append([Button.inline(f"🗑 {label}"[:64], f"delordergroup:{g.id}".encode(), style="danger")])
-    buttons.append([Button.inline("« Orqaga", b"group_menu")])
+    buttons.append([Button.inline("« Orqaga", b"group_menu", style="primary")])
     return "\n".join(lines), buttons
 
 
@@ -256,9 +284,11 @@ async def send_groups_list(respond, manager, user) -> None:
     async for dialog in client.iter_dialogs(limit=200):
         if not dialog.is_group:
             continue
-        mark = "🔕" if dialog.id in excluded else "🔔"
+        is_excluded = dialog.id in excluded
+        mark = "🔕" if is_excluded else "🔔"
         label = f"{mark} {dialog.name}"[:64]
-        buttons.append([Button.inline(label, f"toggexc:{dialog.id}".encode())])
+        style = "danger" if is_excluded else "success"
+        buttons.append([Button.inline(label, f"toggexc:{dialog.id}".encode(), style=style)])
         if len(buttons) >= GROUPS_PAGE_LIMIT:
             break
 
@@ -266,7 +296,7 @@ async def send_groups_list(respond, manager, user) -> None:
         await respond("Siz a'zo bo'lgan guruhlar topilmadi.")
         return
 
-    buttons.append([Button.inline("« Menyu", b"menu")])
+    buttons.append([Button.inline("« Menyu", b"menu", style="primary")])
     await respond(
         "🔔 = kuzatiladi, 🔕 = kuzatilmaydi. Holatni almashtirish uchun guruh nomini bosing:",
         buttons=buttons,
@@ -280,7 +310,7 @@ def blocked_list_view(tg_user_id: int) -> tuple[str, list]:
         for b in blocked
     ]
     buttons.append([Button.inline("➕ ID/username orqali bloklash", b"block_add", style="danger")])
-    buttons.append([Button.inline("« Bosh menyu", b"menu")])
+    buttons.append([Button.inline("« Bosh menyu", b"menu", style="primary")])
     text = (
         "🚫 Bloklangan foydalanuvchilar (blokdan chiqarish uchun bosing):"
         if blocked
@@ -309,10 +339,13 @@ def ad_menu_view(user) -> tuple[str, list]:
         ]
     )
     buttons = [
-        [Button.inline("✏️ Matnni sozlash", b"ad_set_text"), Button.inline("⏱ Intervalni sozlash", b"ad_set_interval")],
-        [Button.inline("🗂 Guruhlarni tanlash", b"ad_groups_menu")],
+        [
+            Button.inline("✏️ Matnni sozlash", b"ad_set_text", style="primary"),
+            Button.inline("⏱ Intervalni sozlash", b"ad_set_interval", style="primary"),
+        ],
+        [Button.inline("🗂 Guruhlarni tanlash", b"ad_groups_menu", style="primary")],
         [Button.inline(active_label, b"ad_toggle_active", style=active_style), Button.inline("🚀 Hozir yuborish", b"ad_send_now", style="primary")],
-        [Button.inline("« Bosh menyu", b"menu")],
+        [Button.inline("« Bosh menyu", b"menu", style="primary")],
     ]
     return text, buttons
 
@@ -328,9 +361,11 @@ async def send_ad_groups_list(respond, manager, user) -> None:
     async for dialog in client.iter_dialogs(limit=200):
         if not dialog.is_group:
             continue
-        mark = "🟢" if dialog.id in selected else "⚪"
+        is_selected = dialog.id in selected
+        mark = "🟢" if is_selected else "⚪"
         label = f"{mark} {dialog.name}"[:64]
-        buttons.append([Button.inline(label, f"toggad:{dialog.id}".encode())])
+        style = "success" if is_selected else "primary"
+        buttons.append([Button.inline(label, f"toggad:{dialog.id}".encode(), style=style)])
         if len(buttons) >= GROUPS_PAGE_LIMIT:
             break
 
@@ -338,7 +373,7 @@ async def send_ad_groups_list(respond, manager, user) -> None:
         await respond("Siz a'zo bo'lgan guruhlar topilmadi.")
         return
 
-    buttons.append([Button.inline("« Reklama menyusi", b"ad_menu")])
+    buttons.append([Button.inline("« Reklama menyusi", b"ad_menu", style="primary")])
     await respond(
         "🟢 = reklama shu guruhga yuboriladi, ⚪ = yuborilmaydi. Holatni almashtirish uchun guruh nomini bosing:",
         buttons=buttons,
@@ -723,7 +758,7 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
             return
         buttons = [[Button.inline(f"❌ {w}", f"delkw:{w}".encode(), style="danger")] for w in kws]
         buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_kw_bulk", style="danger")])
-        buttons.append([Button.inline("« Orqaga", b"kw_menu")])
+        buttons.append([Button.inline("« Orqaga", b"kw_menu", style="primary")])
         await event.answer()
         await event.edit(
             "O'chirmoqchi bo'lgan kalit so'zni tanlang, yoki bir nechtasini vergul bilan "
@@ -762,10 +797,10 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         if kws:
             buttons = [[Button.inline(f"❌ {w}", f"delkw:{w}".encode(), style="danger")] for w in kws]
             buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_kw_bulk", style="danger")])
-            buttons.append([Button.inline("« Orqaga", b"kw_menu")])
+            buttons.append([Button.inline("« Orqaga", b"kw_menu", style="primary")])
             await event.edit("O'chirmoqchi bo'lgan kalit so'zni tanlang:", buttons=buttons)
         else:
-            await event.edit("Kalit so'zlar qolmadi.", buttons=[[Button.inline("« Orqaga", b"kw_menu")]])
+            await event.edit("Kalit so'zlar qolmadi.", buttons=[[Button.inline("« Orqaga", b"kw_menu", style="primary")]])
 
     elif data == b"list_dkw":
         dkws = db_utils.list_driver_keywords(tg_user_id)
@@ -813,7 +848,7 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
             return
         buttons = [[Button.inline(f"❌ {w}", f"deldkw:{w}".encode(), style="danger")] for w in dkws]
         buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_dkw_bulk", style="danger")])
-        buttons.append([Button.inline("« Orqaga", b"dkw_menu")])
+        buttons.append([Button.inline("« Orqaga", b"dkw_menu", style="primary")])
         await event.answer()
         await event.edit(
             "O'chirmoqchi bo'lgan haydovchi so'zni tanlang, yoki bir nechtasini vergul "
@@ -851,10 +886,10 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         if dkws:
             buttons = [[Button.inline(f"❌ {w}", f"deldkw:{w}".encode(), style="danger")] for w in dkws]
             buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_dkw_bulk", style="danger")])
-            buttons.append([Button.inline("« Orqaga", b"dkw_menu")])
+            buttons.append([Button.inline("« Orqaga", b"dkw_menu", style="primary")])
             await event.edit("O'chirmoqchi bo'lgan haydovchi so'zni tanlang:", buttons=buttons)
         else:
-            await event.edit("Haydovchi so'zlari qolmadi.", buttons=[[Button.inline("« Orqaga", b"dkw_menu")]])
+            await event.edit("Haydovchi so'zlari qolmadi.", buttons=[[Button.inline("« Orqaga", b"dkw_menu", style="primary")]])
 
     elif data == b"set_group":
         await event.answer()
@@ -1084,7 +1119,7 @@ async def _accounts_menu_view(tg_user_id: int) -> tuple[str, list]:
     if not accs:
         lines.append("Hozircha qo'shimcha akkaunt yo'q.")
     buttons.append([Button.inline("➕ Akkaunt qo'shish", b"add_account", style="success")])
-    buttons.append([Button.inline("« Bosh menyu", b"menu")])
+    buttons.append([Button.inline("« Bosh menyu", b"menu", style="primary")])
     return "\n".join(lines), buttons
 
 

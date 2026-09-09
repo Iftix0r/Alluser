@@ -29,28 +29,28 @@ def _user_row_label(user) -> str:
 
 def admin_menu_buttons() -> list:
     return [
-        [Button.inline("👥 Foydalanuvchilar", b"admin_users:0")],
-        [Button.inline("🔍 Qidirish", b"admin_search")],
-        [Button.inline("⏳ Muddati tugayotganlar", b"admin_expiring")],
-        [Button.inline("📢 Xabar yuborish", b"admin_broadcast")],
-        [Button.inline("📊 Statistika", b"admin_stats")],
+        [Button.inline("👥 Foydalanuvchilar", b"admin_users:0", style="primary")],
+        [Button.inline("🔍 Qidirish", b"admin_search", style="primary")],
+        [Button.inline("⏳ Muddati tugayotganlar", b"admin_expiring", style="primary")],
+        [Button.inline("📢 Xabar yuborish", b"admin_broadcast", style="primary")],
+        [Button.inline("📊 Statistika", b"admin_stats", style="primary")],
     ]
 
 
 def _users_page_buttons(users, page: int) -> list:
     start = page * USERS_PAGE_SIZE
     chunk = users[start : start + USERS_PAGE_SIZE]
-    buttons = [[Button.inline(_user_row_label(u), f"admin_user:{u.id}".encode())] for u in chunk]
+    buttons = [[Button.inline(_user_row_label(u), f"admin_user:{u.id}".encode(), style="primary")] for u in chunk]
 
     nav = []
     if page > 0:
-        nav.append(Button.inline("« Oldingi", f"admin_users:{page - 1}".encode()))
+        nav.append(Button.inline("« Oldingi", f"admin_users:{page - 1}".encode(), style="primary"))
     if start + USERS_PAGE_SIZE < len(users):
-        nav.append(Button.inline("Keyingi »", f"admin_users:{page + 1}".encode()))
+        nav.append(Button.inline("Keyingi »", f"admin_users:{page + 1}".encode(), style="primary"))
     if nav:
         buttons.append(nav)
 
-    buttons.append([Button.inline("« Admin menyu", b"admin_menu")])
+    buttons.append([Button.inline("« Admin menyu", b"admin_menu", style="primary")])
     return buttons
 
 
@@ -80,16 +80,16 @@ def _user_detail_buttons(user) -> list:
             Button.inline("➕ 7 kun", f"admin_ext:{user.id}:7".encode(), style="success"),
             Button.inline("➕ 30 kun", f"admin_ext:{user.id}:30".encode(), style="success"),
         ],
-        [Button.inline("✏️ Boshqa muddat", f"admin_ext_custom:{user.id}".encode())],
+        [Button.inline("✏️ Boshqa muddat", f"admin_ext_custom:{user.id}".encode(), style="primary")],
         [
             Button.inline("♾ Cheksiz obuna", f"admin_unlimited:{user.id}".encode(), style="success"),
             Button.inline("🛑 Obunani bekor qilish", f"admin_revoke:{user.id}".encode(), style="danger"),
         ],
         [Button.inline(active_label, f"admin_toggle:{user.id}".encode(), style=active_style)],
-        [Button.inline("✉️ Xabar yuborish", f"admin_msg:{user.id}".encode())],
+        [Button.inline("✉️ Xabar yuborish", f"admin_msg:{user.id}".encode(), style="primary")],
         [Button.inline("🔌 Sessiyani tozalash", f"admin_clear_session:{user.id}".encode(), style="danger")],
         [Button.inline("🗑 Foydalanuvchini o'chirish", f"admin_delete_confirm:{user.id}".encode(), style="danger")],
-        [Button.inline("« Ro'yxatga qaytish", b"admin_users:0")],
+        [Button.inline("« Ro'yxatga qaytish", b"admin_users:0", style="primary")],
     ]
 
 
@@ -164,8 +164,8 @@ async def _dispatch_admin_callback(event, manager) -> None:
                 if not results:
                     await conv.send_message("Hech narsa topilmadi.")
                     return
-                buttons = [[Button.inline(_user_row_label(u), f"admin_user:{u.id}".encode())] for u in results[:20]]
-                buttons.append([Button.inline("« Admin menyu", b"admin_menu")])
+                buttons = [[Button.inline(_user_row_label(u), f"admin_user:{u.id}".encode(), style="primary")] for u in results[:20]]
+                buttons.append([Button.inline("« Admin menyu", b"admin_menu", style="primary")])
                 await conv.send_message(f"🔍 Topildi ({len(results)}):", buttons=buttons)
         except AlreadyInConversationError:
             await event.respond(ADMIN_BUSY_TEXT)
@@ -176,8 +176,8 @@ async def _dispatch_admin_callback(event, manager) -> None:
         if not users:
             await event.respond("Yaqin 3 kun ichida muddati tugaydiganlar yo'q.")
             return
-        buttons = [[Button.inline(_user_row_label(u), f"admin_user:{u.id}".encode())] for u in users]
-        buttons.append([Button.inline("« Admin menyu", b"admin_menu")])
+        buttons = [[Button.inline(_user_row_label(u), f"admin_user:{u.id}".encode(), style="primary")] for u in users]
+        buttons.append([Button.inline("« Admin menyu", b"admin_menu", style="primary")])
         await event.respond(f"⏳ Muddati 3 kun ichida tugaydi ({len(users)}):", buttons=buttons)
 
     elif data == b"admin_broadcast":
@@ -313,7 +313,7 @@ async def _dispatch_admin_callback(event, manager) -> None:
             buttons=[
                 [
                     Button.inline("✅ Ha, o'chirish", f"admin_delete:{user_id}".encode(), style="danger"),
-                    Button.inline("❌ Bekor qilish", f"admin_user:{user_id}".encode()),
+                    Button.inline("❌ Bekor qilish", f"admin_user:{user_id}".encode(), style="primary"),
                 ]
             ],
         )
@@ -329,7 +329,7 @@ async def _dispatch_admin_callback(event, manager) -> None:
         await event.answer("🗑 O'chirildi.")
         await event.edit(
             f"🗑 {target.phone or target.tg_user_id} butunlay o'chirildi.",
-            buttons=[[Button.inline("« Ro'yxatga qaytish", b"admin_users:0")]],
+            buttons=[[Button.inline("« Ro'yxatga qaytish", b"admin_users:0", style="primary")]],
         )
 
     elif data.startswith(b"admin_clear_session:"):
@@ -348,7 +348,7 @@ async def _dispatch_admin_callback(event, manager) -> None:
         user = db_utils.find_user_by_id(user_id)
         await event.respond(
             f"🔌 Sessiya tozalandi, foydalanuvchi qayta ulanishi kerak.\n\n{_user_detail_text(user)}",
-            buttons=[[Button.inline("« Ro'yxatga qaytish", b"admin_users:0")]],
+            buttons=[[Button.inline("« Ro'yxatga qaytish", b"admin_users:0", style="primary")]],
         )
 
     elif data.startswith(b"admin_users:"):
