@@ -76,7 +76,9 @@ LOGOUT_CONFIRM_TEXT = (
     "Akkauntni uzsangiz, userbot kuzatishni to'xtatadi va qayta ulash uchun "
     "/start bosishingiz kerak bo'ladi. Davom etasizmi?"
 )
-LOGOUT_CONFIRM_BUTTONS = [[Button.inline("✅ Ha, uzish", b"logout_yes"), Button.inline("❌ Bekor qilish", b"logout_no")]]
+LOGOUT_CONFIRM_BUTTONS = [
+    [Button.inline("✅ Ha, uzish", b"logout_yes", style="danger"), Button.inline("❌ Bekor qilish", b"logout_no")]
+]
 
 SET_GROUP_PROMPT_TEXT = (
     "📦 Buyurtmalar guruhining ID raqamini yuboring (masalan: -1001234567890).\n\n"
@@ -150,24 +152,25 @@ def summarize_remove_results(results: dict[str, bool]) -> str:
 
 def main_menu(user) -> list:
     active_label = "⏸ Pauza qilish" if user.is_active else "▶️ Davom ettirish"
+    active_style = "danger" if user.is_active else "success"
     unmatched_label = (
         "🧭 Aniqlanmagan: yo'lovchi ✅" if user.assume_passenger_if_unmatched else "🧭 Aniqlanmagan: yo'lovchi ❌"
     )
     return [
         [Button.inline("🔑 Kalit so'zlar", b"kw_menu"), Button.inline("🚖 Haydovchi so'zlari", b"dkw_menu")],
         [Button.inline("📦 Buyurtma guruhi", b"group_menu"), Button.inline("🗂 Kuzatiladigan guruhlar", b"groups_menu")],
-        [Button.inline("📊 Holat", b"status"), Button.inline(active_label, b"toggle_active")],
+        [Button.inline("📊 Holat", b"status"), Button.inline(active_label, b"toggle_active", style=active_style)],
         [Button.inline(unmatched_label, b"toggle_unmatched_passenger")],
         [Button.inline("🚫 Bloklanganlar", b"blocked_menu"), Button.inline("📢 Reklama", b"ad_menu")],
         [Button.inline("👥 Akkauntlar", b"accounts_menu"), Button.inline("❓ Yordam", b"help")],
-        [Button.url("👨‍💼 Admin", f"https://t.me/{ADMIN_CONTACT_USERNAME}")],
-        [Button.inline("🔌 Akkauntni uzish", b"logout_confirm")],
+        [Button.url("👨‍💼 Admin", f"https://t.me/{ADMIN_CONTACT_USERNAME}", style="primary")],
+        [Button.inline("🔌 Akkauntni uzish", b"logout_confirm", style="danger")],
     ]
 
 
 def keyword_submenu() -> list:
     return [
-        [Button.inline("➕ Qo'shish", b"add_kw"), Button.inline("➖ O'chirish", b"del_kw")],
+        [Button.inline("➕ Qo'shish", b"add_kw", style="success"), Button.inline("➖ O'chirish", b"del_kw", style="danger")],
         [Button.inline("📋 Ro'yxat", b"list_kw"), Button.inline("📤 Export", b"export_kw")],
         [Button.inline("« Bosh menyu", b"menu")],
     ]
@@ -175,7 +178,7 @@ def keyword_submenu() -> list:
 
 def driver_keyword_submenu() -> list:
     return [
-        [Button.inline("➕ Qo'shish", b"add_dkw"), Button.inline("➖ O'chirish", b"del_dkw")],
+        [Button.inline("➕ Qo'shish", b"add_dkw", style="success"), Button.inline("➖ O'chirish", b"del_dkw", style="danger")],
         [Button.inline("📋 Ro'yxat", b"list_dkw"), Button.inline("📤 Export", b"export_dkw")],
         [Button.inline("« Bosh menyu", b"menu")],
     ]
@@ -195,9 +198,9 @@ def order_group_submenu(tg_user_id: int, bot_username: str) -> list:
     add_url = f"https://t.me/{bot_username}?startgroup=setgroup_{tg_user_id}"
     add_extra_url = f"https://t.me/{bot_username}?startgroup=addordergroup_{tg_user_id}"
     return [
-        [Button.url("➕ Guruhga qo'shish", add_url)],
-        [Button.inline("🔗 ID orqali ulash", b"set_group"), Button.inline("🗑 Uzish", b"remove_group")],
-        [Button.url("➕ Qo'shimcha guruh", add_extra_url), Button.inline("🗂 Qo'shimcha guruhlar", b"extra_groups_menu")],
+        [Button.url("➕ Guruhga qo'shish", add_url, style="success")],
+        [Button.inline("🔗 ID orqali ulash", b"set_group"), Button.inline("🗑 Uzish", b"remove_group", style="danger")],
+        [Button.url("➕ Qo'shimcha guruh", add_extra_url, style="success"), Button.inline("🗂 Qo'shimcha guruhlar", b"extra_groups_menu")],
         [Button.inline("« Bosh menyu", b"menu")],
     ]
 
@@ -216,7 +219,7 @@ def extra_order_groups_view(user_id: int) -> tuple[str, list]:
     for g in groups:
         label = g.title or str(g.chat_id)
         lines.append(f"- {label}")
-        buttons.append([Button.inline(f"🗑 {label}"[:64], f"delordergroup:{g.id}".encode())])
+        buttons.append([Button.inline(f"🗑 {label}"[:64], f"delordergroup:{g.id}".encode(), style="danger")])
     buttons.append([Button.inline("« Orqaga", b"group_menu")])
     return "\n".join(lines), buttons
 
@@ -273,10 +276,10 @@ async def send_groups_list(respond, manager, user) -> None:
 def blocked_list_view(tg_user_id: int) -> tuple[str, list]:
     blocked = db_utils.list_blocked_senders(tg_user_id)
     buttons = [
-        [Button.inline(f"❌ {b.sender_name or b.sender_id}"[:64], f"unblock:{b.sender_id}".encode())]
+        [Button.inline(f"❌ {b.sender_name or b.sender_id}"[:64], f"unblock:{b.sender_id}".encode(), style="success")]
         for b in blocked
     ]
-    buttons.append([Button.inline("➕ ID/username orqali bloklash", b"block_add")])
+    buttons.append([Button.inline("➕ ID/username orqali bloklash", b"block_add", style="danger")])
     buttons.append([Button.inline("« Bosh menyu", b"menu")])
     text = (
         "🚫 Bloklangan foydalanuvchilar (blokdan chiqarish uchun bosing):"
@@ -291,6 +294,7 @@ def ad_menu_view(user) -> tuple[str, list]:
     target_count = len(db_utils.get_ad_target_group_ids(user.id))
     preview = (settings.text[:80] + "…") if settings.text and len(settings.text) > 80 else (settings.text or "belgilanmagan")
     active_label = "⏸ O'chirish" if settings.is_active else "▶️ Yoqish"
+    active_style = "danger" if settings.is_active else "success"
     status_label = "yoqilgan" if settings.is_active else "o'chirilgan"
     last_sent_label = settings.last_sent_at.strftime("%Y-%m-%d %H:%M") if settings.last_sent_at else "-"
     text = "\n".join(
@@ -307,7 +311,7 @@ def ad_menu_view(user) -> tuple[str, list]:
     buttons = [
         [Button.inline("✏️ Matnni sozlash", b"ad_set_text"), Button.inline("⏱ Intervalni sozlash", b"ad_set_interval")],
         [Button.inline("🗂 Guruhlarni tanlash", b"ad_groups_menu")],
-        [Button.inline(active_label, b"ad_toggle_active"), Button.inline("🚀 Hozir yuborish", b"ad_send_now")],
+        [Button.inline(active_label, b"ad_toggle_active", style=active_style), Button.inline("🚀 Hozir yuborish", b"ad_send_now", style="primary")],
         [Button.inline("« Bosh menyu", b"menu")],
     ]
     return text, buttons
@@ -717,8 +721,8 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         if not kws:
             await event.answer("Kalit so'zlar yo'q.", alert=True)
             return
-        buttons = [[Button.inline(f"❌ {w}", f"delkw:{w}".encode())] for w in kws]
-        buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_kw_bulk")])
+        buttons = [[Button.inline(f"❌ {w}", f"delkw:{w}".encode(), style="danger")] for w in kws]
+        buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_kw_bulk", style="danger")])
         buttons.append([Button.inline("« Orqaga", b"kw_menu")])
         await event.answer()
         await event.edit(
@@ -756,8 +760,8 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         await event.answer(f"O'chirildi: {word}")
         kws = db_utils.list_keywords(tg_user_id)
         if kws:
-            buttons = [[Button.inline(f"❌ {w}", f"delkw:{w}".encode())] for w in kws]
-            buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_kw_bulk")])
+            buttons = [[Button.inline(f"❌ {w}", f"delkw:{w}".encode(), style="danger")] for w in kws]
+            buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_kw_bulk", style="danger")])
             buttons.append([Button.inline("« Orqaga", b"kw_menu")])
             await event.edit("O'chirmoqchi bo'lgan kalit so'zni tanlang:", buttons=buttons)
         else:
@@ -807,8 +811,8 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         if not dkws:
             await event.answer("Haydovchi so'zlari yo'q.", alert=True)
             return
-        buttons = [[Button.inline(f"❌ {w}", f"deldkw:{w}".encode())] for w in dkws]
-        buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_dkw_bulk")])
+        buttons = [[Button.inline(f"❌ {w}", f"deldkw:{w}".encode(), style="danger")] for w in dkws]
+        buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_dkw_bulk", style="danger")])
         buttons.append([Button.inline("« Orqaga", b"dkw_menu")])
         await event.answer()
         await event.edit(
@@ -845,8 +849,8 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         await event.answer(f"O'chirildi: {word}")
         dkws = db_utils.list_driver_keywords(tg_user_id)
         if dkws:
-            buttons = [[Button.inline(f"❌ {w}", f"deldkw:{w}".encode())] for w in dkws]
-            buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_dkw_bulk")])
+            buttons = [[Button.inline(f"❌ {w}", f"deldkw:{w}".encode(), style="danger")] for w in dkws]
+            buttons.append([Button.inline("✏️ Bir nechtasini yozib o'chirish", b"del_dkw_bulk", style="danger")])
             buttons.append([Button.inline("« Orqaga", b"dkw_menu")])
             await event.edit("O'chirmoqchi bo'lgan haydovchi so'zni tanlang:", buttons=buttons)
         else:
@@ -1076,10 +1080,10 @@ async def _accounts_menu_view(tg_user_id: int) -> tuple[str, list]:
     buttons = []
     for acc in accs:
         lines.append(f"📱 {acc.phone}")
-        buttons.append([Button.inline(f"🗑 {acc.phone} ni o'chirish", f"delacc:{acc.id}".encode())])
+        buttons.append([Button.inline(f"🗑 {acc.phone} ni o'chirish", f"delacc:{acc.id}".encode(), style="danger")])
     if not accs:
         lines.append("Hozircha qo'shimcha akkaunt yo'q.")
-    buttons.append([Button.inline("➕ Akkaunt qo'shish", b"add_account")])
+    buttons.append([Button.inline("➕ Akkaunt qo'shish", b"add_account", style="success")])
     buttons.append([Button.inline("« Bosh menyu", b"menu")])
     return "\n".join(lines), buttons
 
@@ -1089,7 +1093,7 @@ async def run_login_flow(bot_client: TelegramClient, manager, chat_id: int, tg_u
         async with bot_client.conversation(chat_id, timeout=300) as conv:
             await conv.send_message(
                 WELCOME,
-                buttons=[[Button.request_phone("📱 Telefon raqamni yuborish")]],
+                buttons=[[Button.request_phone("📱 Telefon raqamni yuborish", style="primary")]],
             )
             phone_msg = await conv.get_response()
             if phone_msg.contact:
@@ -1160,7 +1164,7 @@ async def run_extra_account_login(bot_client: TelegramClient, manager, chat_id: 
         async with bot_client.conversation(chat_id, timeout=300) as conv:
             await conv.send_message(
                 "Qo'shmoqchi bo'lgan akkauntning telefon raqamini yuboring (masalan: +998901234567):",
-                buttons=[[Button.request_phone("📱 Telefon raqamni yuborish")]],
+                buttons=[[Button.request_phone("📱 Telefon raqamni yuborish", style="primary")]],
             )
             phone_msg = await conv.get_response()
             if phone_msg.contact:

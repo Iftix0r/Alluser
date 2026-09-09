@@ -74,20 +74,21 @@ def _user_detail_text(user) -> str:
 
 def _user_detail_buttons(user) -> list:
     active_label = "⛔ To'xtatish" if user.is_active else "▶️ Yoqish"
+    active_style = "danger" if user.is_active else "success"
     return [
         [
-            Button.inline("➕ 7 kun", f"admin_ext:{user.id}:7".encode()),
-            Button.inline("➕ 30 kun", f"admin_ext:{user.id}:30".encode()),
+            Button.inline("➕ 7 kun", f"admin_ext:{user.id}:7".encode(), style="success"),
+            Button.inline("➕ 30 kun", f"admin_ext:{user.id}:30".encode(), style="success"),
         ],
         [Button.inline("✏️ Boshqa muddat", f"admin_ext_custom:{user.id}".encode())],
         [
-            Button.inline("♾ Cheksiz obuna", f"admin_unlimited:{user.id}".encode()),
-            Button.inline("🛑 Obunani bekor qilish", f"admin_revoke:{user.id}".encode()),
+            Button.inline("♾ Cheksiz obuna", f"admin_unlimited:{user.id}".encode(), style="success"),
+            Button.inline("🛑 Obunani bekor qilish", f"admin_revoke:{user.id}".encode(), style="danger"),
         ],
-        [Button.inline(active_label, f"admin_toggle:{user.id}".encode())],
+        [Button.inline(active_label, f"admin_toggle:{user.id}".encode(), style=active_style)],
         [Button.inline("✉️ Xabar yuborish", f"admin_msg:{user.id}".encode())],
-        [Button.inline("🔌 Sessiyani tozalash", f"admin_clear_session:{user.id}".encode())],
-        [Button.inline("🗑 Foydalanuvchini o'chirish", f"admin_delete_confirm:{user.id}".encode())],
+        [Button.inline("🔌 Sessiyani tozalash", f"admin_clear_session:{user.id}".encode(), style="danger")],
+        [Button.inline("🗑 Foydalanuvchini o'chirish", f"admin_delete_confirm:{user.id}".encode(), style="danger")],
         [Button.inline("« Ro'yxatga qaytish", b"admin_users:0")],
     ]
 
@@ -311,7 +312,7 @@ async def _dispatch_admin_callback(event, manager) -> None:
             "bo'lmaydi — barcha kalit so'zlar, guruhlar va sozlamalar yo'qoladi.",
             buttons=[
                 [
-                    Button.inline("✅ Ha, o'chirish", f"admin_delete:{user_id}".encode()),
+                    Button.inline("✅ Ha, o'chirish", f"admin_delete:{user_id}".encode(), style="danger"),
                     Button.inline("❌ Bekor qilish", f"admin_user:{user_id}".encode()),
                 ]
             ],

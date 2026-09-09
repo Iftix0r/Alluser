@@ -401,7 +401,7 @@ class UserbotManager:
         buttons = [
             *([group_row] if group_row else []),
             link_row,
-            [Button.inline("🚫 Bloklash", f"block:{sender.id}:{current.id}".encode())],
+            [Button.inline("🚫 Bloklash", f"block:{sender.id}:{current.id}".encode(), style="danger")],
         ]
 
         extra_group_ids = await asyncio.to_thread(db_utils.get_extra_order_group_ids, current.id)
