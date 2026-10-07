@@ -1947,6 +1947,175 @@ async def _add_one_allowed_group(client, user, link: str) -> str:
     return f"ℹ️ {title} — allaqachon ro'yxatda bor edi."
 
 
+_PRIVATE_INVITE_HASH_RE = re.compile(
+    r"^(?:https?://)?(?:t\.me|telegram\.me)/\+([A-Za-z0-9_-]+)$"
+)
+
+
+async def _connect_and_add_monitored_group(manager, user, ref: str) -> str:
+    """Foydalanuvchi bergan havola yoki ID orqali userbot guruhga ulanadi (agar
+    hali a'zo bo'lmagan bo'lsa) va uni kuzatiladigan guruhlar ro'yxatiga qo'shadi.
+
+    Qo'llab-quvvatlanadi:
+      • Ommaviy havola:   https://t.me/guruh_nomi  yoki  @guruh_nomi
+      • Yopiq taklif havolasi: https://t.me/+HASH  yoki  https://t.me/joinchat/HASH
+      • Guruh ID raqami: -1001234567890  yoki  1001234567890
+    """
+    client = manager.clients.get(user.id)
+    if not client:
+        return "❌ Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring."
+
+    ref = ref.strip()
+    title = None
+    chat_id = None
+    username = None
+
+    # --- 1. Yopiq taklif havolasimi? ---
+    invite_m = _PRIVATE_INVITE_HASH_RE.match(ref)
+    # joinchat/... shaklini ham tekshir
+    if not invite_m:
+        invite_m = re.match(
+            r"^(?:https?://)?(?:t\.me|telegram\.me)/joinchat/([A-Za-z0-9_-]+)$", ref
+        )
+
+    if invite_m:
+        invite_hash = invite_m.group(1)
+        try:
+            invite_info = await client(CheckChatInviteRequest(invite_hash))
+        except InviteHashInvalidError:
+            return "❌ Taklif havolasi noto'g'ri yoki yaroqsiz."
+        except InviteHashExpiredError:
+            return "❌ Taklif havolasining muddati tugagan."
+        except FloodWaitError as e:
+            return f"⏳ Telegram vaqtincha cheklov qo'ygan ({e.seconds}s). Keyinroq qayta urinib ko'ring."
+        except Exception as e:
+            logger.warning("CheckChatInviteRequest xatoligi: %s", e)
+            return f"❌ Havola tekshirib bo'lmadi: {type(e).__name__}"
+
+        from telethon.tl.types import ChatInviteAlready, ChatInvitePeek
+        already_member = isinstance(invite_info, (ChatInviteAlready, ChatInvitePeek))
+        if already_member:
+            # a'zo, chat_id ni oling
+            chat = getattr(invite_info, "chat", None)
+            if chat:
+                chat_id = get_peer_id(chat)
+                title = getattr(chat, "title", None)
+        else:
+            # Qo'shilish
+            title_from_info = getattr(invite_info, "title", None)
+            try:
+                result = await client(ImportChatInviteRequest(invite_hash))
+                joined_chat = getattr(result, "chats", [None])[0]
+                if joined_chat:
+                    chat_id = get_peer_id(joined_chat)
+                    title = getattr(joined_chat, "title", title_from_info) or title_from_info
+            except UserAlreadyParticipantError:
+                # Baribir a'zo bo'lib chiqdi — dialoglardan topib olish kerak
+                title = title_from_info
+            except ChannelsTooMuchError:
+                return (
+                    "❌ Akkaunt juda ko'p guruhlarga a'zo. Biror guruhdan chiqib, \n"
+                    "qayta urinib ko'ring."
+                )
+            except FloodWaitError as e:
+                return f"⏳ Flood-limit ({e.seconds}s). Keyinroq qayta urinib ko'ring."
+            except Exception as e:
+                logger.warning("ImportChatInviteRequest xatoligi: %s", e)
+                return f"❌ Guruhga qo'shilishda xatolik: {html.escape(str(e))}"
+
+        # Agar chat_id topilmasa — dialoglardan qidirib olamiz
+        if chat_id is None and title:
+            try:
+                async for dialog in client.iter_dialogs(limit=100):
+                    if (dialog.is_group or dialog.is_channel) and getattr(dialog.entity, "title", None) == title:
+                        chat_id = dialog.id
+                        break
+            except Exception:
+                pass
+
+        if chat_id is None:
+            return (
+                f"⚠️ Guruhga qo'shildingiz, lekin guruh ID sini aniqlab bo'lmadi. "
+                "Bir oz kutib, /groups buyrug'ini qayta yuborib ko'ring."
+            )
+
+    else:
+        # --- 2. Ommaviy havola yoki ID ---
+        chat_id_parsed, username_parsed = _parse_group_reference(ref)
+
+        if chat_id_parsed is None and username_parsed is None:
+            return (
+                "❌ Tushunmadim. Quyidagilardan birini yuboring:\n"
+                "• <code>https://t.me/guruh_nomi</code>\n"
+                "• <code>https://t.me/+taklif_havolasi</code>\n"
+                "• <code>@guruh_nomi</code>\n"
+                "• <code>-1001234567890</code> (guruh ID raqami)"
+            )
+
+        if username_parsed:
+            # Ommaviy guruh — entity orqali
+            try:
+                entity = await client.get_entity(username_parsed)
+            except FloodWaitError as e:
+                return f"⏳ Telegram vaqtincha cheklov qo'ygan ({e.seconds}s). Keyinroq qayta urinib ko'ring."
+            except Exception as e:
+                logger.warning("get_entity xatoligi: %s — %s", username_parsed, e)
+                return f"❌ Guruh topilmadi: @{html.escape(username_parsed)}"
+
+            chat_id = get_peer_id(entity)
+            title = getattr(entity, "title", None)
+            username = username_parsed
+
+            # A'zo emasmiz — qo'shilish
+            already = False
+            try:
+                dialogs_ids = {d.id async for d in client.iter_dialogs(limit=300) if d.is_group or d.is_channel}
+                already = chat_id in dialogs_ids
+            except Exception:
+                pass
+
+            if not already:
+                try:
+                    await client(JoinChannelRequest(entity))
+                except UserAlreadyParticipantError:
+                    pass
+                except ChannelsTooMuchError:
+                    return (
+                        "❌ Akkaunt juda ko'p guruhlarga a'zo. Biror guruhdan chiqib, \n"
+                        "qayta urinib ko'ring."
+                    )
+                except FloodWaitError as e:
+                    return f"⏳ Flood-limit ({e.seconds}s). Keyinroq qayta urinib ko'ring."
+                except Exception as e:
+                    logger.warning("JoinChannelRequest xatoligi: %s — %s", username_parsed, e)
+                    return f"❌ Guruhga qo'shilishda xatolik: {html.escape(str(e))}"
+        else:
+            # ID berilgan — allaqachon a'zo bo'lishi kerak
+            chat_id = chat_id_parsed
+            try:
+                entity = await client.get_entity(chat_id)
+                title = getattr(entity, "title", None)
+                username = getattr(entity, "username", None)
+            except Exception:
+                title = None
+
+    # --- 3. ExcludedGroup dan olib tashlash (agar blokda bo'lsa) ---
+    was_excluded = await asyncio.to_thread(db_utils.unexclude_group, user.id, chat_id)
+
+    # --- 4. AllowedGroup ga qo'shish (whitelist rejimi uchun) ---
+    title = title or username or str(chat_id)
+    await asyncio.to_thread(db_utils.add_allowed_group, user.id, chat_id, username, title)
+
+    # --- 5. Natijani qaytarish ---
+    parts = [f"✅ <b>{html.escape(title)}</b> guruhi muvaffaqiyatli ulandi!"]
+    parts.append(f"🆔 Chat ID: <code>{chat_id}</code>")
+    parts.append("")
+    parts.append("🔔 Endi bu guruhdan buyurtmalar qabul qilinadi.")
+    if was_excluded:
+        parts.append("ℹ️ Guruh avval kuzatuvdan chiqarilgan edi — endi qayta yoqildi.")
+    return "\n".join(parts)
+
+
 async def _accounts_menu_view(tg_user_id: int) -> tuple[str, list]:
     accs = db_utils.list_extra_accounts(tg_user_id)
     lines = ["👥 Qo'shimcha akkauntlar:"]
