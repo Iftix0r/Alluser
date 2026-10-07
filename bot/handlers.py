@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import re
 import time
@@ -6,14 +7,20 @@ import time
 from telethon import TelegramClient, events
 from telethon.errors import (
     AlreadyInConversationError,
+    ChannelsTooMuchError,
     FloodWaitError,
+    InviteHashExpiredError,
+    InviteHashInvalidError,
     PhoneCodeExpiredError,
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
     SessionPasswordNeededError,
+    UserAlreadyParticipantError,
 )
 from telethon.sessions import StringSession
 from telethon.tl.custom import Button
+from telethon.tl.functions.channels import JoinChannelRequest
+from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest
 from telethon.utils import get_peer_id, parse_phone
 
 import db_utils
@@ -48,6 +55,7 @@ HELP = (
     "/addordergroup - (guruh ichida) shu guruhni QO'SHIMCHA buyurtma guruhi qilib qo'shish\n"
     "/removeordergroup - (guruh ichida) shu guruhni qo'shimcha buyurtma guruhlaridan olib tashlash\n"
     "/groups - kuzatiladigan guruhlarni boshqarish\n"
+    "/addgroup <havola yoki ID> - yangi guruhni kuzatuvga ulash\n"
     "/logout - akkauntni uzish\n\n"
     "Buyurtmalar guruhini ulash uchun bosh menyudagi \"📦 Buyurtma guruhi\" → "
     "\"➕ Guruhga qo'shish\" tugmasini bosing va ro'yxatdan guruhni tanlang — avtomatik ulanadi.\n\n"
@@ -378,9 +386,11 @@ async def send_groups_list(respond, manager, user) -> None:
 
     excluded = db_utils.get_excluded_group_ids(user.id)
     buttons = []
+    seen_chat_ids = set()
     async for dialog in client.iter_dialogs(limit=200):
         if not dialog.is_group:
             continue
+        seen_chat_ids.add(dialog.id)
         is_excluded = dialog.id in excluded
         mark = "🔕" if is_excluded else "🔔"
         label = f"{mark} {dialog.name}"[:64]
@@ -389,13 +399,34 @@ async def send_groups_list(respond, manager, user) -> None:
         if len(buttons) >= GROUPS_PAGE_LIMIT:
             break
 
+    # Ruxsat berilgan (qo'lda qo'shilgan) guruhlar dialoglarda chiqmagan bo'lsa ham qo'shish
+    allowed_groups = db_utils.list_allowed_groups(user.id)
+    for g in allowed_groups:
+        if g.chat_id not in seen_chat_ids and len(buttons) < GROUPS_PAGE_LIMIT:
+            seen_chat_ids.add(g.chat_id)
+            is_excluded = g.chat_id in excluded
+            mark = "🔕" if is_excluded else "🔔"
+            label = f"{mark} {g.title or g.username or g.chat_id}"[:64]
+            style = "danger" if is_excluded else "success"
+            buttons.append([Button.inline(label, f"toggexc:{g.chat_id}".encode(), style=style)])
+
+    action_buttons = [
+        [Button.inline("➕ Guruh qo'shish", b"add_monitored_group", style="success")],
+        [Button.inline("« Menyu", b"menu", style="primary")],
+    ]
+
     if not buttons:
-        await respond("Siz a'zo bo'lgan guruhlar topilmadi.")
+        await respond(
+            "🗂 Sizda hali kuzatiladigan guruhlar mavjud emas.\n\n"
+            "Yangi guruhni havola yoki ID raqami orqali ulash uchun \"➕ Guruh qo'shish\" tugmasini bosing:",
+            buttons=action_buttons,
+        )
         return
 
-    buttons.append([Button.inline("« Menyu", b"menu", style="primary")])
+    buttons.extend(action_buttons)
     await respond(
-        "🔔 = kuzatiladi, 🔕 = kuzatilmaydi. Holatni almashtirish uchun guruh nomini bosing:",
+        "🔔 = kuzatiladi, 🔕 = kuzatilmaydi. Holatni almashtirish uchun guruh nomini bosing:\n\n"
+        "➕ Yangi guruh ulash uchun \"➕ Guruh qo'shish\" tugmasini bosing:",
         buttons=buttons,
     )
 
@@ -952,6 +983,46 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             return
         await send_groups_list(event.respond, manager, user)
 
+    @bot_client.on(events.NewMessage(pattern=r"/addgroup(?: (.+))?", func=lambda e: e.is_private))
+    async def addgroup_handler(event):
+        user = db_utils.get_user(event.sender_id)
+        if not user or not user.session_string:
+            await event.respond("Akkaunt ulanmagan. /start bosing.")
+            return
+        client = manager.clients.get(user.id)
+        if not client:
+            if not user.is_active:
+                await event.respond(
+                    "⏸ Hisobingiz pauzada. Bosh menyudan \"▶️ Davom ettirish\" bosing."
+                )
+            else:
+                await event.respond("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
+            return
+
+        raw_arg = (event.pattern_match.group(1) or "").strip()
+        if raw_arg:
+            status_msg = await event.respond("⏳ Guruh tekshirilmoqda va ulanmoqda...")
+            result = await _connect_and_add_monitored_group(manager, user, raw_arg)
+            await status_msg.edit(
+                result,
+                parse_mode="html",
+                buttons=[
+                    [Button.inline("🗂 Kuzatiladigan guruhlar", b"groups_menu", style="primary")],
+                    [Button.inline("« Bosh menyu", b"menu", style="primary")],
+                ],
+            )
+        else:
+            await event.respond(
+                "➕ <b>Kuzatiladigan guruh qo'shish</b>\n\n"
+                "Foydalanish: <code>/addgroup &lt;havola yoki ID&gt;</code>\n\n"
+                "Masalan:\n"
+                "• <code>/addgroup https://t.me/guruh_nomi</code>\n"
+                "• <code>/addgroup https://t.me/+havola</code>\n"
+                "• <code>/addgroup -1001234567890</code>\n\n"
+                "Yoki <b>\"🗂 Kuzatiladigan guruhlar\"</b> bo'limidagi <b>\"➕ Guruh qo'shish\"</b> tugmasidan foydalaning.",
+                parse_mode="html",
+            )
+
     @bot_client.on(events.NewMessage(func=lambda e: e.is_private and manager.is_bulk_allow(e.sender_id)))
     async def bulk_allow_message_handler(event):
         text = (event.raw_text or "").strip()
@@ -1286,10 +1357,77 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         await event.answer()
         await send_groups_list(event.respond, manager, user)
 
+    elif data == b"add_monitored_group":
+        await event.answer()
+        client = manager.clients.get(user.id)
+        if not client:
+            if not user.is_active:
+                await event.respond(
+                    "⏸ Hisobingiz hozir pauzada — shuning uchun userbot ishlamayapti. "
+                    "Avval bosh menyudan \"▶️ Davom ettirish\" tugmasini bosing, keyin qayta urinib ko'ring."
+                )
+            else:
+                await event.respond("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
+            return
+
+        try:
+            async with bot_client.conversation(event.chat_id, timeout=180) as conv:
+                await conv.send_message(
+                    "➕ <b>Kuzatiladigan guruh qo'shish</b>\n\n"
+                    "Guruh ID raqami yoki havolasini yuboring:\n"
+                    "• Ommaviy havola: <code>https://t.me/guruh_nomi</code> yoki <code>@guruh_nomi</code>\n"
+                    "• Yopiq guruh taklif havolasi: <code>https://t.me/+havola...</code>\n"
+                    "• Guruh ID raqami: <code>-1001234567890</code>\n\n"
+                    "ℹ️ <i>Bot guruhga avtomatik ulanadi va yangi buyurtmalarni qabul qilishni boshlaydi.</i>\n\n"
+                    "Bekor qilish uchun /cancel deb yozing.",
+                    parse_mode="html",
+                )
+                try:
+                    resp = await conv.get_response()
+                except asyncio.TimeoutError:
+                    await conv.send_message("⏳ Vaqt tugadi.")
+                    return
+
+                raw_text = (resp.raw_text or "").strip()
+                if not raw_text or raw_text.lower() == "/cancel":
+                    await conv.send_message("❌ Bekor qilindi.")
+                    return
+
+                status_msg = await conv.send_message("⏳ Guruh tekshirilmoqda va ulanmoqda...")
+                result_text = await _connect_and_add_monitored_group(manager, user, raw_text)
+                await status_msg.edit(
+                    result_text,
+                    parse_mode="html",
+                    buttons=[
+                        [Button.inline("🗂 Kuzatiladigan guruhlar", b"groups_menu", style="primary")],
+                        [Button.inline("« Bosh menyu", b"menu", style="primary")],
+                    ],
+                )
+        except AlreadyInConversationError:
+            await event.respond(BUSY_TEXT)
+
     elif data.startswith(b"toggexc:"):
         chat_id = int(data[len(b"toggexc:"):])
         now_excluded = db_utils.toggle_excluded_group(user.id, chat_id)
         await event.answer("🔕 Kuzatishdan chiqarildi" if now_excluded else "🔔 Kuzatishga qo'shildi")
+        try:
+            msg = await event.get_message()
+            if msg and msg.buttons:
+                new_buttons = []
+                for row in msg.buttons:
+                    new_row = []
+                    for btn in row:
+                        if btn.data == data:
+                            clean_text = btn.text.lstrip("🔔🔕 ")
+                            new_mark = "🔕" if now_excluded else "🔔"
+                            new_style = "danger" if now_excluded else "success"
+                            new_row.append(Button.inline(f"{new_mark} {clean_text}"[:64], data, style=new_style))
+                        else:
+                            new_row.append(btn)
+                    new_buttons.append(new_row)
+                await event.edit(buttons=new_buttons)
+        except Exception:
+            pass
 
     elif data == b"remove_group":
         ok = db_utils.clear_order_group(tg_user_id)

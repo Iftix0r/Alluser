@@ -501,6 +501,21 @@ def exclude_group(user_id: int, chat_id: int) -> bool:
         db.close()
 
 
+def unexclude_group(user_id: int, chat_id: int) -> bool:
+    """Guruhni istisno (bloklangan) ro'yxatidan chiqaradi (ya'ni kuzatuvga oladi).
+    True = chiqarildi, False = ro'yxatda yo'q edi."""
+    db = SessionLocal()
+    try:
+        existing = db.query(ExcludedGroup).filter_by(user_id=user_id, chat_id=chat_id).first()
+        if existing:
+            db.delete(existing)
+            db.commit()
+            return True
+        return False
+    finally:
+        db.close()
+
+
 def seconds_since_last_order(user_id: int, sender_id: int) -> float | None:
     """Shu yuboruvchidan (sender) shu foydalanuvchi (user) uchun oxirgi marta
     qachon buyurtma yuborilganini soniyada qaytaradi. Hali bo'lmagan bo'lsa - None."""
