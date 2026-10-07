@@ -130,6 +130,7 @@ async def _dispatch_admin_callback(event, manager) -> None:
         active = sum(1 for u in connected if u.is_active and db_utils.is_subscription_active(u))
         expired = sum(1 for u in connected if not db_utils.is_subscription_active(u))
         order_stats = db_utils.get_global_order_stats()
+        ad_stats = db_utils.get_global_ad_stats()
         top_users = db_utils.get_top_order_users(limit=5, since=datetime.utcnow() - timedelta(days=7))
         lines = [
             "📊 Statistika:\n",
@@ -140,6 +141,8 @@ async def _dispatch_admin_callback(event, manager) -> None:
             "",
             f"📦 Buyurtmalar — bugun: {order_stats['today']}, "
             f"7 kunda: {order_stats['week']}, jami: {order_stats['total']}",
+            f"📣 Reklama xabarlari — bugun: {ad_stats['today']}, "
+            f"7 kunda: {ad_stats['week']}, jami: {ad_stats['total']}",
         ]
         if top_users:
             lines.append("\n🏆 Oxirgi 7 kunda eng faol foydalanuvchilar:")

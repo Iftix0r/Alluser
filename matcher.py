@@ -22,6 +22,26 @@ EMOJI_RE = re.compile(
 )
 
 
+ROUTE_RE = re.compile(
+    r"([A-Za-zʻʼ'’ʻʼ\-]{3,}?)\s*dan\b\s*([A-Za-zʻʼ'’ʻʼ\-]{3,}?)\s*ga\b",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def extract_route(text: str) -> tuple[str, str] | None:
+    """Xabar matnidan \"...dan ... ga\" qolipidagi yo'nalishni (jo'nash -> borish)
+    aniqlashga harakat qiladi. Erkin so'zlashuv matni bo'lgani uchun 100% aniq emas."""
+    if not text:
+        return None
+    match = ROUTE_RE.search(text)
+    if not match:
+        return None
+    frm, to = match.group(1).strip("-"), match.group(2).strip("-")
+    if not frm or not to:
+        return None
+    return frm[:1].upper() + frm[1:], to[:1].upper() + to[1:]
+
+
 def extract_phone(text: str) -> str | None:
     if not text:
         return None

@@ -1,10 +1,12 @@
 import asyncio
 import logging
 import re
+import time
 
 from telethon import TelegramClient, events
 from telethon.errors import (
     AlreadyInConversationError,
+    FloodWaitError,
     PhoneCodeExpiredError,
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
@@ -12,14 +14,12 @@ from telethon.errors import (
 )
 from telethon.sessions import StringSession
 from telethon.tl.custom import Button
+from telethon.utils import get_peer_id, parse_phone
 
 import db_utils
-from config import API_HASH, API_ID
+from config import ADMIN_CONTACT_ID, ADMIN_CONTACT_USERNAME, API_HASH, API_ID
 
 logger = logging.getLogger(__name__)
-
-ADMIN_CONTACT_USERNAME = "Iftix0r"
-ADMIN_CONTACT_ID = 2114098498
 
 WELCOME = (
     "Salom! Bu bot orqali siz o'z Telegram akkauntingizni ulab, guruhlardagi "
@@ -95,6 +95,91 @@ ADD_KEYWORD_FAIL_TEXT = (
     f"(ko'pi bilan {db_utils.MAX_KEYWORD_LENGTH} belgi)."
 )
 BUSY_TEXT = "Avvalgi amal hali tugallanmagan. Birozdan so'ng qayta urinib ko'ring."
+
+_PUBLIC_LINK_RE = re.compile(r"^(?:https?://)?(?:t\.me|telegram\.me)/([A-Za-z0-9_]{5,32})/?$")
+_PRIVATE_INVITE_RE = re.compile(r"^(?:https?://)?(?:t\.me|telegram\.me)/(?:\+|joinchat/)")
+_BARE_USERNAME_RE = re.compile(r"^@?([A-Za-z0-9_]{5,32})$")
+
+
+def _extract_public_username(text: str) -> str | None:
+    """Guruh havolasidan (yoki @username dan) foydalanuvchi nomini ajratib oladi.
+    Shaxsiy (invite-link) havola yoki noto'g'ri format bo'lsa - None qaytaradi."""
+    text = text.strip()
+    if _PRIVATE_INVITE_RE.match(text):
+        return None
+    m = _PUBLIC_LINK_RE.match(text)
+    if m:
+        return m.group(1)
+    m = _BARE_USERNAME_RE.match(text)
+    if m:
+        return m.group(1)
+    return None
+
+
+_PRIVATE_MSG_LINK_RE = re.compile(r"^(?:https?://)?(?:t\.me|telegram\.me)/c/(\d+)(?:/\d+)?/?$")
+_BARE_ID_RE = re.compile(r"^-?\d+$")
+
+
+def _parse_group_reference(text: str) -> tuple[int | None, str | None]:
+    """Guruh havolasi yoki ID sidan (chat_id, username) ni ajratib oladi.
+    - t.me/c/<channel_id>/<msg_id> - shaxsiy xabar havolasi, chat_id to'g'ridan-to'g'ri
+      hisoblanadi (tarmoqqa so'rov yubormasdan).
+    - t.me/username yoki @username - username qaytariladi, chat_id keyin resolve qilinadi.
+    - xom raqam (masalan -1001234567890 yoki 1234567890) - chat_id sifatida.
+    Hech biriga mos kelmasa (None, None) qaytadi."""
+    text = text.strip()
+
+    m = _PRIVATE_MSG_LINK_RE.match(text)
+    if m:
+        channel_id = int(m.group(1))
+        return -(1000000000000 + channel_id), None
+
+    # Sof raqam (username emas) - _extract_public_username dan oldin tekshiriladi,
+    # chunki uning bare-username regexi raqamli qatorlarga ham mos kelib qoladi.
+    if _BARE_ID_RE.match(text):
+        raw = int(text)
+        chat_id = raw if raw < 0 else -(1000000000000 + raw)
+        return chat_id, None
+
+    username = _extract_public_username(text)
+    if username:
+        return None, username
+
+    return None, None
+
+
+_GROUP_LINK_FINDALL_RE = re.compile(r"(?:https?://)?(?:t\.me|telegram\.me)/[A-Za-z0-9_+/]+")
+_BARE_USERNAME_MENTION_RE = re.compile(r"(?<!\S)@([A-Za-z0-9_]{5,32})(?!\S)")
+
+
+def _extract_group_refs(text: str) -> list[str]:
+    """Erkin matn ichidan (masalan, boshqa gap-so'zlar bilan aralash yuborilgan
+    ro'yxatdan) guruh havolalarini (t.me/...), @username larni va alohida
+    qatordagi xom ID larni ajratib oladi - qolgan matnni e'tiborsiz qoldiradi."""
+    refs: list[str] = []
+    seen: set[str] = set()
+
+    for m in _GROUP_LINK_FINDALL_RE.finditer(text):
+        link = m.group(0).rstrip(").,;​")
+        if link not in seen:
+            seen.add(link)
+            refs.append(link)
+
+    for m in _BARE_USERNAME_MENTION_RE.finditer(text):
+        ref = m.group(0)
+        if ref not in seen:
+            seen.add(ref)
+            refs.append(ref)
+
+    for line in text.splitlines():
+        line = line.strip()
+        if line and _BARE_ID_RE.match(line) and line not in seen:
+            seen.add(line)
+            refs.append(line)
+
+    return refs[:100]
+
+
 GENERIC_ERROR_TEXT = "Xatolik yuz berdi. Birozdan so'ng qayta urinib ko'ring."
 SUBSCRIPTION_EXPIRED_TEXT = (
     "⛔ Obunangiz muddati tugagan. Xizmatdan davom etish uchun admin bilan bog'lanib "
@@ -176,9 +261,14 @@ def main_menu(user) -> list:
             Button.inline("📢 Reklama", b"ad_menu", style="primary"),
         ],
         [
-            Button.inline("👥 Akkauntlar", b"accounts_menu", style="primary"),
-            Button.inline("❓ Yordam", b"help", style="primary"),
+            Button.inline("👋 Salomlashuv xabari", b"greeting_menu", style="primary"),
         ],
+        [
+            Button.inline("👥 Akkauntlar", b"accounts_menu", style="primary"),
+            Button.inline("👤 Adminlar", b"admins_menu", style="primary"),
+        ],
+        [Button.inline("🔒 Faqat ruxsat berilgan guruhlar", b"allowed_menu", style="primary")],
+        [Button.inline("❓ Yordam", b"help", style="primary")],
         [Button.url("👨‍💼 Admin", f"https://t.me/{ADMIN_CONTACT_USERNAME}", style="primary")],
         [Button.inline("🔌 Akkauntni uzish", b"logout_confirm", style="danger")],
     ]
@@ -256,6 +346,8 @@ def format_status(user) -> str:
     kws = db_utils.list_keywords(user.tg_user_id)
     dkws = db_utils.list_driver_keywords(user.tg_user_id)
     extra_groups = db_utils.list_extra_order_groups(user.id)
+    order_stats = db_utils.get_user_order_stats(user.id)
+    ad_stats = db_utils.get_user_ad_stats(user.id)
     return "\n".join(
         [
             f"📱 Telefon: {user.phone or '-'}",
@@ -266,6 +358,11 @@ def format_status(user) -> str:
             f"💳 Obuna: {db_utils.format_subscription_status(user)}",
             f"🔑 Kalit so'zlar ({len(kws)}): {', '.join(kws) if kws else '-'}",
             f"🚖 Haydovchi so'zlari ({len(dkws)}): {', '.join(dkws) if dkws else '-'}",
+            "",
+            f"📊 Buyurtmalar — bugun: {order_stats['today']}, "
+            f"7 kunda: {order_stats['week']}, jami: {order_stats['total']}",
+            f"📣 Reklama xabarlari — bugun: {ad_stats['today']}, "
+            f"7 kunda: {ad_stats['week']}, jami: {ad_stats['total']}",
         ]
     )
 
@@ -350,6 +447,60 @@ def ad_menu_view(user) -> tuple[str, list]:
     return text, buttons
 
 
+def greeting_menu_view(user, bot_username: str) -> tuple[str, list]:
+    from userbot.manager import DEFAULT_CUSTOMER_GREETING_TEMPLATE, DEFAULT_GREETING_TEMPLATE
+
+    def _preview(text: str) -> str:
+        return (text[:200] + "…") if len(text) > 200 else text
+
+    is_custom = bool(user.greeting_text)
+    active_text = user.greeting_text or DEFAULT_GREETING_TEMPLATE.format(bot_username=bot_username)
+    enabled_label = "⏸ O'chirish" if user.greeting_enabled else "▶️ Yoqish"
+    enabled_style = "danger" if user.greeting_enabled else "success"
+    status_label = "yoqilgan" if user.greeting_enabled else "o'chirilgan"
+
+    is_ccustom = bool(user.customer_greeting_text)
+    active_ctext = user.customer_greeting_text or DEFAULT_CUSTOMER_GREETING_TEMPLATE.format(
+        bot_username=bot_username
+    )
+    cenabled_label = "⏸ O'chirish" if user.customer_greeting_enabled else "▶️ Yoqish"
+    cenabled_style = "danger" if user.customer_greeting_enabled else "success"
+    cstatus_label = "yoqilgan" if user.customer_greeting_enabled else "o'chirilgan (standart)"
+
+    lines = [
+        "👋 Salomlashuv xabarlari sozlamalari:",
+        "",
+        "1️⃣ *Sizga shaxsiy yozganlarga:*",
+        "Sizga shaxsiy chatda yozgan yangi odamga (yoki 2 kundan keyin qayta "
+        "yozgan eski tanishga) avtomatik shu xabar yuboriladi.",
+        f"📝 Matn {'(sizniki)' if is_custom else '(standart)'}: {_preview(active_text)}",
+        f"▶️ Holat: {status_label}",
+        "",
+        "2️⃣ *Guruhda mijoz deb aniqlangan odamga:*",
+        "Guruh xabari kalit so'zga mos kelib, mijoz deb aniqlansa, o'sha odamga "
+        "shaxsan (siz birinchi bo'lib) shu xabar yuboriladi. Soatiga faqat 1-2 ta "
+        "avtomatik yuboriladi (spamdan himoya) — qolganlari uchun sizga \"Ha/Yo'q\" "
+        "tugmali so'rov keladi, o'zingiz qaror qilasiz.",
+        f"📝 Matn {'(sizniki)' if is_ccustom else '(standart)'}: {_preview(active_ctext)}",
+        f"▶️ Holat: {cstatus_label}",
+    ]
+
+    buttons = [
+        [Button.inline("✏️ (1) Matnni o'zgartirish", b"greeting_set_text", style="primary")],
+    ]
+    if is_custom:
+        buttons.append([Button.inline("↩️ (1) Standartga qaytarish", b"greeting_reset_text", style="primary")])
+    buttons.append([Button.inline(f"(1) {enabled_label}", b"greeting_toggle", style=enabled_style)])
+
+    buttons.append([Button.inline("✏️ (2) Matnni o'zgartirish", b"cgreeting_set_text", style="primary")])
+    if is_ccustom:
+        buttons.append([Button.inline("↩️ (2) Standartga qaytarish", b"cgreeting_reset_text", style="primary")])
+    buttons.append([Button.inline(f"(2) {cenabled_label}", b"cgreeting_toggle", style=cenabled_style)])
+
+    buttons.append([Button.inline("« Bosh menyu", b"menu", style="primary")])
+    return "\n".join(lines), buttons
+
+
 async def send_ad_groups_list(respond, manager, user) -> None:
     client = manager.clients.get(user.id)
     if not client:
@@ -380,8 +531,114 @@ async def send_ad_groups_list(respond, manager, user) -> None:
     )
 
 
+# Ba'zan tarmoq beqaror bo'lganda (Telethon qayta ulanib, o'tkazib yuborilgan
+# yangilanishlarni tiklaganda — "Got difference" jarayoni) bitta xabar ikki marta
+# yetib kelishi mumkin. Shu sababli har bir xabarni (chat, xabar ID) bo'yicha faqat
+# bir marta qayta ishlaymiz — ikkinchi nusxa butunlay e'tiborsiz qoldiriladi.
+_seen_messages: dict[tuple[int, int], float] = {}
+DEDUP_WINDOW_SECONDS = 60
+MAX_DEDUP_ENTRIES = 3000
+
+
+def _is_duplicate_update(chat_id: int, message_id: int) -> bool:
+    key = (chat_id, message_id)
+    now = time.monotonic()
+
+    if len(_seen_messages) > MAX_DEDUP_ENTRIES:
+        cutoff = now - DEDUP_WINDOW_SECONDS
+        for k, seen_at in list(_seen_messages.items()):
+            if seen_at < cutoff:
+                del _seen_messages[k]
+
+    if key in _seen_messages:
+        return True
+    _seen_messages[key] = now
+    return False
+
+
+def _is_order_authorized(owner, clicker_tg_id: int) -> bool:
+    """Buyurtma kartasidagi \"⚙️ Amallar\" menyusidan kim foydalana olishini tekshiradi:
+    akkaunt egasi yoki u qo'shgan qo'shimcha adminlardan biri."""
+    if owner.tg_user_id == clicker_tg_id:
+        return True
+    return db_utils.is_team_admin(owner.id, clicker_tg_id)
+
+
 def register_handlers(bot_client: TelegramClient, manager, bot_username: str) -> None:
-    @bot_client.on(events.NewMessage(pattern="/start", func=lambda e: e.is_private))
+    @bot_client.on(events.NewMessage())
+    async def dedup_guard(event):
+        if _is_duplicate_update(event.chat_id, event.id):
+            logger.warning(
+                "Takroriy xabar o'tkazib yuborildi (chat=%s, msg=%s) — takroriy yetkazib "
+                "berish tufayli qayta ishlov berilmadi.",
+                event.chat_id,
+                event.id,
+            )
+            raise events.StopPropagation
+
+    @bot_client.on(events.NewMessage(pattern=r"^/start(?:@\w+)?\s+act_(\S+)$", func=lambda e: e.is_private))
+    async def order_action_menu_handler(event):
+        token = event.pattern_match.group(1)
+        pending = manager.peek_pending_action(token)
+        if not pending:
+            await event.respond("⏱ Bu so'rov eskirgan yoki allaqachon ishlatilgan.")
+            return
+
+        owner = db_utils.find_user_by_id(pending["owner_db_id"])
+        if not owner or not _is_order_authorized(owner, event.sender_id):
+            await event.respond("❌ Kechirasiz, siz admin emassiz.")
+            return
+
+        sender_label = pending.get("sender_name") or str(pending["sender_id"])
+        buttons = [
+            [Button.inline("🚫 Foydalanuvchini bloklash", f"act_block:{token}".encode(), style="danger")],
+            [Button.inline("🔕 Guruhni bloklash", f"act_blockgroup:{token}".encode(), style="danger")],
+            [Button.inline("❌ Bekor qilish", f"act_cancel:{token}".encode())],
+        ]
+        await event.respond(
+            f"⚙️ <b>Amallar</b>\n\n👤 Yuboruvchi: {sender_label}\n\nNima qilmoqchisiz?",
+            buttons=buttons,
+            parse_mode="html",
+        )
+
+    @bot_client.on(events.CallbackQuery(func=lambda e: e.is_private and e.data and e.data.startswith(b"act_")))
+    async def order_action_callback_handler(event):
+        action, _, token = event.data.decode().partition(":")
+        pending = manager.peek_pending_action(token)
+        if not pending:
+            await event.answer("⏱ Bu so'rov eskirgan.", alert=True)
+            return
+
+        owner = db_utils.find_user_by_id(pending["owner_db_id"])
+        if not owner or not _is_order_authorized(owner, event.sender_id):
+            await event.answer("❌ Kechirasiz, siz admin emassiz.", alert=True)
+            return
+
+        manager.pop_pending_action(token)
+
+        if action == "act_cancel":
+            await event.answer("Bekor qilindi.")
+            await event.edit("❌ Bekor qilindi.")
+            return
+
+        if action == "act_block":
+            db_utils.block_sender(owner.tg_user_id, pending["sender_id"], pending["sender_name"])
+            await event.answer("🚫 Foydalanuvchi bloklandi.")
+            await event.edit("🚫 Foydalanuvchi bloklandi. Endi undan zakaz kelmaydi.")
+            return
+
+        if action == "act_blockgroup":
+            added = db_utils.exclude_group(owner.id, pending["chat_id"])
+            await event.answer("🔕 Guruh bloklandi." if added else "ℹ️ Bu guruh allaqachon bloklangan edi.")
+            await event.edit(
+                "🔕 Guruh bloklandi. Endi bu guruhdan zakaz kelmaydi."
+                if added else "ℹ️ Bu guruh allaqachon bloklangan edi."
+            )
+            return
+
+        await event.answer(GENERIC_ERROR_TEXT, alert=True)
+
+    @bot_client.on(events.NewMessage(pattern=r"^/start(?:@\w+)?\s*$", func=lambda e: e.is_private))
     async def start_handler(event):
         tg_user_id = event.sender_id
         user = db_utils.get_or_create_user(tg_user_id)
@@ -620,6 +877,64 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
         except Exception:
             logger.warning("Bloklangan buyurtma xabarini o'chirib bo'lmadi: chat=%s", event.chat_id)
 
+    @bot_client.on(events.CallbackQuery(func=lambda e: e.is_group and e.data and e.data.startswith(b"blockgroup:")))
+    async def order_blockgroup_handler(event):
+        try:
+            _, chat_id_s, owner_id_s = event.data.decode().split(":")
+            chat_id = int(chat_id_s)
+            owner_user_id = int(owner_id_s)
+        except ValueError:
+            await event.answer(GENERIC_ERROR_TEXT, alert=True)
+            return
+
+        owner = db_utils.find_user_by_id(owner_user_id)
+        if not owner:
+            await event.answer("Xatolik: foydalanuvchi topilmadi.", alert=True)
+            return
+
+        added = db_utils.exclude_group(owner.id, chat_id)
+        await event.answer(
+            "🔕 Guruh bloklandi, endi bu guruhdan zakaz kelmaydi."
+            if added else "ℹ️ Bu guruh allaqachon bloklangan edi."
+        )
+        try:
+            await bot_client.delete_messages(event.chat_id, [event.message_id])
+        except Exception:
+            logger.warning("Bloklangan guruh buyurtma xabarini o'chirib bo'lmadi: chat=%s", event.chat_id)
+
+    @bot_client.on(events.CallbackQuery(func=lambda e: e.is_group and e.data and e.data.startswith(b"close:")))
+    async def order_close_handler(event):
+        try:
+            order_card_id = int(event.data.decode().split(":", 1)[1])
+        except ValueError:
+            await event.answer(GENERIC_ERROR_TEXT, alert=True)
+            return
+
+        closer = await event.get_sender()
+        closer_name = " ".join(
+            filter(None, [getattr(closer, "first_name", None), getattr(closer, "last_name", None)])
+        ) or "Foydalanuvchi"
+
+        closed = await asyncio.to_thread(db_utils.close_order_card, order_card_id, closer_name)
+        if not closed:
+            await event.answer("Bu buyurtma allaqachon yopilgan.", alert=True)
+            return
+
+        await event.answer("✅ Zakaz yopildi!")
+
+        pairs = await asyncio.to_thread(db_utils.get_order_card_messages, order_card_id)
+        for chat_id, message_id in pairs:
+            try:
+                msg = await bot_client.get_messages(chat_id, ids=message_id)
+                if not msg:
+                    continue
+                new_text = f"{msg.raw_text}\n\n✅ ZAKAZ YOPILDI\n👤 Yopdi: {closer_name}"
+                await bot_client.edit_message(chat_id, message_id, new_text, buttons=None, parse_mode=None)
+            except Exception:
+                logger.warning(
+                    "Zakaz kartasini tahrirlab bo'lmadi: order_card=%s, chat=%s", order_card_id, chat_id
+                )
+
     @bot_client.on(events.NewMessage(pattern="/removegroup", func=lambda e: e.is_private))
     async def removegroup_handler(event):
         user = db_utils.get_user(event.sender_id)
@@ -636,6 +951,50 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             await event.respond("Akkaunt ulanmagan. /start bosing.")
             return
         await send_groups_list(event.respond, manager, user)
+
+    @bot_client.on(events.NewMessage(func=lambda e: e.is_private and manager.is_bulk_allow(e.sender_id)))
+    async def bulk_allow_message_handler(event):
+        text = (event.raw_text or "").strip()
+        if not text or text.startswith("/"):
+            return  # komandalar shu rejimda ham odatdagidek ishlayveradi
+
+        user = db_utils.get_user(event.sender_id)
+        if not user:
+            return
+        client = manager.clients.get(user.id)
+        if not client:
+            if not user.is_active:
+                await event.respond(
+                    "⏸ Hisobingiz hozir pauzada — shuning uchun userbot ishlamayapti. "
+                    "Avval bosh menyudan \"▶️ Davom ettirish\" tugmasini bosing, keyin qayta urinib ko'ring."
+                )
+            else:
+                await event.respond("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
+            raise events.StopPropagation
+
+        refs = _extract_group_refs(text)
+        if not refs:
+            raise events.StopPropagation
+
+        results = []
+        for ref in refs:
+            results.append(await _add_one_allowed_group(client, user, ref))
+            await asyncio.sleep(1.0)  # ResolveUsername so'rovlarini flood qilmaslik uchun
+
+        for i in range(0, len(results), 30):
+            await event.respond("\n".join(results[i:i + 30]))
+        raise events.StopPropagation
+
+    @bot_client.on(events.CallbackQuery(func=lambda e: e.is_private and e.data == b"allow_bulk_done"))
+    async def allow_bulk_done_handler(event):
+        manager.exit_bulk_allow(event.sender_id)
+        await event.answer("✅ Tugatildi.")
+        user = db_utils.get_user(event.sender_id)
+        if not user:
+            await event.edit("✅ Tugatildi.")
+            return
+        text, buttons = await _allowed_menu_view(user)
+        await event.edit(text, buttons=buttons, parse_mode="html")
 
     @bot_client.on(events.NewMessage(pattern="/logout", func=lambda e: e.is_private))
     async def logout_handler(event):
@@ -1072,6 +1431,108 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         else:
             await event.respond(f"✅ {sent} ta guruhga yuborildi.")
 
+    elif data == b"greeting_menu":
+        await event.answer()
+        text, buttons = greeting_menu_view(user, bot_username)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"greeting_set_text":
+        await event.answer()
+        try:
+            async with bot_client.conversation(event.chat_id, timeout=180) as conv:
+                await conv.send_message(
+                    "Yangi salomlashuv xabari matnini yuboring "
+                    f"(ko'pi bilan {db_utils.MAX_GREETING_TEXT_LENGTH} belgi):"
+                )
+                try:
+                    resp = await conv.get_response()
+                except asyncio.TimeoutError:
+                    await conv.send_message("Vaqt tugadi.")
+                    return
+                ok = db_utils.set_greeting_text(tg_user_id, resp.raw_text or "")
+                if ok:
+                    await conv.send_message("✅ Salomlashuv xabari saqlandi.")
+                else:
+                    await conv.send_message(
+                        f"❌ Matn bo'sh yoki juda uzun (ko'pi bilan "
+                        f"{db_utils.MAX_GREETING_TEXT_LENGTH} belgi)."
+                    )
+        except AlreadyInConversationError:
+            await event.respond(BUSY_TEXT)
+
+    elif data == b"greeting_reset_text":
+        db_utils.clear_greeting_text(tg_user_id)
+        user = db_utils.get_user(tg_user_id)
+        await event.answer("Standart matnga qaytarildi.")
+        text, buttons = greeting_menu_view(user, bot_username)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"greeting_toggle":
+        db_utils.toggle_greeting_enabled(tg_user_id)
+        user = db_utils.get_user(tg_user_id)
+        await event.answer()
+        text, buttons = greeting_menu_view(user, bot_username)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"cgreeting_set_text":
+        await event.answer()
+        try:
+            async with bot_client.conversation(event.chat_id, timeout=180) as conv:
+                await conv.send_message(
+                    "Guruhda mijoz deb aniqlangan odamga yuboriladigan shaxsiy salomlashuv "
+                    f"matnini yuboring (ko'pi bilan {db_utils.MAX_GREETING_TEXT_LENGTH} belgi):"
+                )
+                try:
+                    resp = await conv.get_response()
+                except asyncio.TimeoutError:
+                    await conv.send_message("Vaqt tugadi.")
+                    return
+                ok = db_utils.set_customer_greeting_text(tg_user_id, resp.raw_text or "")
+                if ok:
+                    await conv.send_message("✅ Mijozga salomlashuv matni saqlandi.")
+                else:
+                    await conv.send_message(
+                        f"❌ Matn bo'sh yoki juda uzun (ko'pi bilan "
+                        f"{db_utils.MAX_GREETING_TEXT_LENGTH} belgi)."
+                    )
+        except AlreadyInConversationError:
+            await event.respond(BUSY_TEXT)
+
+    elif data == b"cgreeting_reset_text":
+        db_utils.clear_customer_greeting_text(tg_user_id)
+        user = db_utils.get_user(tg_user_id)
+        await event.answer("Standart matnga qaytarildi.")
+        text, buttons = greeting_menu_view(user, bot_username)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"cgreeting_toggle":
+        now_enabled = db_utils.toggle_customer_greeting_enabled(tg_user_id)
+        user = db_utils.get_user(tg_user_id)
+        if now_enabled:
+            await event.answer(
+                "Yoqildi! Diqqat: bu guruhda topilgan odamlarga birinchi bo'lib siz yozasiz — "
+                "ehtiyotkorlik bilan ishlating.",
+                alert=True,
+            )
+        else:
+            await event.answer("O'chirildi.")
+        text, buttons = greeting_menu_view(user, bot_username)
+        await event.edit(text, buttons=buttons)
+
+    elif data.startswith(b"cgreet_yes:") or data.startswith(b"cgreet_no:"):
+        token = data.split(b":", 1)[1].decode()
+        approved = data.startswith(b"cgreet_yes:")
+        await event.answer()
+        status = await manager.confirm_customer_greeting(token, approved)
+        if status == "sent":
+            await event.edit("✅ Salomlashuv xabari yuborildi.")
+        elif status == "declined":
+            await event.edit("❌ Bekor qilindi, xabar yuborilmadi.")
+        elif status == "expired":
+            await event.edit("⏱ Bu so'rov eskirgan yoki allaqachon hal qilingan.")
+        else:
+            await event.edit("❌ Xatolik yuz berdi.")
+
     elif data == b"logout_confirm":
         await event.answer()
         await event.respond(LOGOUT_CONFIRM_TEXT, buttons=LOGOUT_CONFIRM_BUTTONS)
@@ -1108,6 +1569,245 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         text, buttons = await _accounts_menu_view(tg_user_id)
         await event.edit(text, buttons=buttons)
 
+    elif data == b"admins_menu":
+        await event.answer()
+        text, buttons = await _admins_menu_view(user.id)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"add_team_admin":
+        await event.answer()
+        try:
+            async with bot_client.conversation(event.chat_id, timeout=120) as conv:
+                await conv.send_message(
+                    "Admin qilmoqchi bo'lgan odamning Telegram ID raqamini yuboring, "
+                    "yoki undan kelgan istalgan xabarni shu yerga forward qiling:"
+                )
+                try:
+                    resp = await conv.get_response()
+                except asyncio.TimeoutError:
+                    await conv.send_message("Vaqt tugadi.")
+                    return
+
+                admin_id = None
+                admin_name = None
+                if resp.forward and resp.forward.sender_id:
+                    admin_id = resp.forward.sender_id
+                    try:
+                        fwd_sender = await resp.forward.get_sender()
+                        admin_name = " ".join(
+                            filter(
+                                None,
+                                [getattr(fwd_sender, "first_name", None), getattr(fwd_sender, "last_name", None)],
+                            )
+                        ) or None
+                    except Exception:
+                        pass
+                elif resp.raw_text and resp.raw_text.strip().lstrip("-").isdigit():
+                    admin_id = int(resp.raw_text.strip())
+                else:
+                    await conv.send_message("❌ Tushunmadim. ID raqam yuboring yoki xabarni forward qiling.")
+                    return
+
+                if admin_id == tg_user_id:
+                    await conv.send_message("ℹ️ Siz allaqachon egasi sifatida to'liq huquqqa egasiz.")
+                    return
+
+                added = db_utils.add_team_admin(user.id, admin_id, admin_name)
+                label = admin_name or str(admin_id)
+                if added:
+                    await conv.send_message(f"✅ {label} (ID: {admin_id}) admin qilib qo'shildi.")
+                else:
+                    await conv.send_message("ℹ️ Bu odam allaqachon admin edi.")
+        except AlreadyInConversationError:
+            await event.respond(BUSY_TEXT)
+
+    elif data.startswith(b"delteamadmin:"):
+        admin_id = int(data[len(b"delteamadmin:"):])
+        removed = db_utils.remove_team_admin(user.id, admin_id)
+        await event.answer("O'chirildi." if removed else "Topilmadi.", alert=not removed)
+        text, buttons = await _admins_menu_view(user.id)
+        await event.edit(text, buttons=buttons)
+
+    elif data == b"allowed_menu":
+        await event.answer()
+        text, buttons = await _allowed_menu_view(user)
+        await event.edit(text, buttons=buttons, parse_mode="html")
+
+    elif data == b"toggle_whitelist":
+        new_value = not user.whitelist_only_groups
+        db_utils.toggle_whitelist_only_groups(tg_user_id, new_value)
+        user = db_utils.get_user(tg_user_id)
+        await event.answer("🔒 Yoqildi." if new_value else "🔓 O'chirildi.")
+        text, buttons = await _allowed_menu_view(user)
+        await event.edit(text, buttons=buttons, parse_mode="html")
+
+    elif data == b"add_allowed_group":
+        await event.answer()
+        if not manager.clients.get(user.id):
+            if not user.is_active:
+                await event.respond(
+                    "⏸ Hisobingiz hozir pauzada — shuning uchun userbot ishlamayapti. "
+                    "Avval bosh menyudan \"▶️ Davom ettirish\" tugmasini bosing, keyin qayta urinib ko'ring."
+                )
+            else:
+                await event.respond("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
+            return
+        manager.enter_bulk_allow(tg_user_id)
+        await event.respond(
+            "🔒 Ruxsat bermoqchi bo'lgan guruh(lar)ni yuboring — havola (https://t.me/guruh_nomi), "
+            "shaxsiy xabar havolasi (t.me/c/...) yoki guruh ID raqami bo'lishi mumkin.\n\n"
+            "Bir nechtasini bitta xabarda yoki ketma-ket alohida xabarlarda yuborishingiz mumkin. "
+            "Tugatgach pastdagi tugmani bosing.",
+            buttons=[[Button.inline("✅ Tugatdim / Bekor qilish", b"allow_bulk_done", style="danger")]],
+        )
+
+    elif data.startswith(b"delallow:"):
+        chat_id_s, _, page_s = data[len(b"delallow:"):].decode().partition(":")
+        chat_id = int(chat_id_s)
+        page = int(page_s) if page_s else 0
+        removed = db_utils.remove_allowed_group(user.id, chat_id)
+        await event.answer("O'chirildi." if removed else "Topilmadi.", alert=not removed)
+        text, buttons = await _allowed_menu_view(user, page)
+        await event.edit(text, buttons=buttons, parse_mode="html")
+
+    elif data.startswith(b"allowed_page:"):
+        page = int(data[len(b"allowed_page:"):])
+        await event.answer()
+        text, buttons = await _allowed_menu_view(user, page)
+        await event.edit(text, buttons=buttons, parse_mode="html")
+
+    elif data == b"join_allowed_groups":
+        if manager.is_joining_allowed_groups(user.id):
+            await event.answer("⏳ Jarayon allaqachon ishlamoqda, kuting.", alert=True)
+            return
+        await event.answer("🔗 Boshlandi — sekin, xavfsiz sur'atda (har guruh uchun ~25s). Tugagach xabar beraman.")
+        asyncio.create_task(_run_join_allowed_groups(manager, user))
+
+
+async def _run_join_allowed_groups(manager, user) -> None:
+    """Fon vazifasi: guruhlarga qo'shilishni ishga tushiradi va tugagach
+    foydalanuvchiga shaxsiy xabarda natijani yuboradi."""
+    try:
+        stats = await manager.join_allowed_groups(user.id, delay_seconds=25.0)
+    except Exception:
+        logger.exception("Guruhlarga qo'shilish jarayonida xatolik: user=%s", user.tg_user_id)
+        await manager.notify(user.tg_user_id, "❌ Guruhlarga qo'shilishda kutilmagan xatolik yuz berdi.")
+        return
+
+    text = (
+        "🔗 <b>Guruhlarga qo'shilish yakunlandi</b>\n\n"
+        f"✅ Yangi qo'shildi: {stats['joined']}\n"
+        f"ℹ️ Allaqachon a'zo edi: {stats['already']}\n"
+        f"⚠️ Qo'shib bo'lmadi: {stats['failed']}\n"
+        f"⏭ O'tkazib yuborildi (shaxsiy/ID li): {stats['skipped']}"
+    )
+    try:
+        await manager.bot_client.send_message(user.tg_user_id, text, parse_mode="html")
+    except Exception:
+        logger.exception("Natija xabarini yuborib bo'lmadi: user=%s", user.tg_user_id)
+
+
+async def _admins_menu_view(user_id: int) -> tuple[str, list]:
+    admins = db_utils.list_team_admins(user_id)
+    lines = ["👤 Qo'shimcha adminlar (buyurtma kartasidagi \"⚙️ Amallar\" menyusidan foydalana oladi):"]
+    buttons = []
+    for a in admins:
+        label = a.admin_name or str(a.admin_tg_id)
+        lines.append(f"👤 {label} (ID: {a.admin_tg_id})")
+        buttons.append([Button.inline(f"🗑 {label} ni o'chirish", f"delteamadmin:{a.admin_tg_id}".encode(), style="danger")])
+    if not admins:
+        lines.append("Hozircha qo'shimcha admin yo'q.")
+    buttons.append([Button.inline("➕ Admin qo'shish", b"add_team_admin", style="success")])
+    buttons.append([Button.inline("« Bosh menyu", b"menu", style="primary")])
+    return "\n".join(lines), buttons
+
+
+ALLOWED_GROUPS_PAGE_SIZE = 10
+
+
+async def _allowed_menu_view(user, page: int = 0) -> tuple[str, list]:
+    allowed = db_utils.list_allowed_groups(user.id)
+    total = len(allowed)
+    total_pages = max(1, (total + ALLOWED_GROUPS_PAGE_SIZE - 1) // ALLOWED_GROUPS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * ALLOWED_GROUPS_PAGE_SIZE
+    page_items = allowed[start:start + ALLOWED_GROUPS_PAGE_SIZE]
+
+    mode_label = "✅ Yoqilgan" if user.whitelist_only_groups else "❌ O'chirilgan"
+    lines = [
+        "🔒 <b>Faqat ruxsat berilgan guruhlar</b>",
+        "",
+        f"Holati: {mode_label}",
+        f"Jami: {total} ta guruh (sahifa {page + 1}/{total_pages})",
+        "",
+        "Yoqilgan bo'lsa - hisobingiz a'zo bo'lgan qancha guruh bo'lishidan qat'iy nazar, "
+        "buyurtmalar FAQAT shu ro'yxatdagi guruhlardan qidiriladi, qolganlari "
+        "e'tiborsiz qoldiriladi.",
+    ]
+    buttons = [
+        [Button.inline(
+            f"{'🔓 Oʻchirish' if user.whitelist_only_groups else '🔒 Yoqish'}",
+            b"toggle_whitelist", style="danger" if user.whitelist_only_groups else "success",
+        )]
+    ]
+    for a in page_items:
+        label = a.title or a.username or str(a.chat_id)
+        lines.append(f"✅ {label}")
+        buttons.append(
+            [Button.inline(f"🗑 {label}"[:40], f"delallow:{a.chat_id}:{page}".encode(), style="danger")]
+        )
+    if not allowed:
+        lines.append("Hozircha ro'yxat bo'sh.")
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(Button.inline("◀ Oldingi", f"allowed_page:{page - 1}".encode(), style="primary"))
+    if page < total_pages - 1:
+        nav_row.append(Button.inline("Keyingi ▶", f"allowed_page:{page + 1}".encode(), style="primary"))
+    if nav_row:
+        buttons.append(nav_row)
+
+    buttons.append([Button.inline("➕ Guruh qo'shish", b"add_allowed_group", style="success")])
+    buttons.append([Button.inline("🔗 Guruhlarga qo'shilish (avtomatik)", b"join_allowed_groups", style="primary")])
+    buttons.append([Button.inline("« Bosh menyu", b"menu", style="primary")])
+    return "\n".join(lines), buttons
+
+
+async def _add_one_allowed_group(client, user, link: str) -> str:
+    """Bitta guruh havolasi/IDsini tekshirib, \"ruxsat berilganlar\" ro'yxatiga qo'shadi.
+    Havola, shaxsiy xabar havolasi (t.me/c/...) yoki xom ID bo'lishi mumkin - akkaunt
+    allaqachon a'zo bo'lgan guruhlar uchun ishlatiladi."""
+    chat_id, username = _parse_group_reference(link)
+    if chat_id is None and username is None:
+        return f"❌ {link} — tushunmadim. Havola, t.me/c/... yoki ID yuboring."
+
+    title = None
+    if chat_id is None:
+        try:
+            entity = await client.get_entity(username)
+        except FloodWaitError as e:
+            return (
+                f"⏳ {link} — Telegram vaqtincha cheklov qo'ygan (juda ko'p so'rov), "
+                f"{e.seconds}s dan keyin qayta urinib ko'ring."
+            )
+        except Exception as e:
+            logger.warning("Guruhni topib bo'lmadi: %s — %s: %s", link, type(e).__name__, e)
+            return f"❌ {link} — guruh/kanal topilmadi."
+        chat_id = get_peer_id(entity)
+        title = getattr(entity, "title", None)
+    else:
+        try:
+            entity = await client.get_entity(chat_id)
+            title = getattr(entity, "title", None)
+        except Exception:
+            pass  # Sarlavhasiz ham qo'shib bo'ladi - ID orqali baribir ishlaydi.
+
+    title = title or username or str(chat_id)
+    added = await asyncio.to_thread(db_utils.add_allowed_group, user.id, chat_id, username, title)
+    if added:
+        return f"✅ {title} — ruxsat berilgan guruhlar ro'yxatiga qo'shildi."
+    return f"ℹ️ {title} — allaqachon ro'yxatda bor edi."
+
 
 async def _accounts_menu_view(tg_user_id: int) -> tuple[str, list]:
     accs = db_utils.list_extra_accounts(tg_user_id)
@@ -1132,11 +1832,20 @@ async def run_login_flow(bot_client: TelegramClient, manager, chat_id: int, tg_u
             )
             phone_msg = await conv.get_response()
             if phone_msg.contact:
-                phone = phone_msg.contact.phone_number.strip()
-                if not phone.startswith("+"):
+                phone = (phone_msg.contact.phone_number or "").strip()
+                if phone and not phone.startswith("+"):
                     phone = "+" + phone
             else:
-                phone = phone_msg.raw_text.strip()
+                phone = (phone_msg.raw_text or "").strip()
+
+            if not phone or not parse_phone(phone):
+                await conv.send_message(
+                    "Telefon raqam formati noto'g'ri. Iltimos, qaytadan /start bosing va "
+                    "raqamni faqat raqamlardan iborat xalqaro formatda yuboring "
+                    "(masalan: +998901234567).",
+                    buttons=Button.clear(),
+                )
+                return
 
             user_client = TelegramClient(StringSession(), API_ID, API_HASH)
             await user_client.connect()
@@ -1203,11 +1912,19 @@ async def run_extra_account_login(bot_client: TelegramClient, manager, chat_id: 
             )
             phone_msg = await conv.get_response()
             if phone_msg.contact:
-                phone = phone_msg.contact.phone_number.strip()
-                if not phone.startswith("+"):
+                phone = (phone_msg.contact.phone_number or "").strip()
+                if phone and not phone.startswith("+"):
                     phone = "+" + phone
             else:
-                phone = phone_msg.raw_text.strip()
+                phone = (phone_msg.raw_text or "").strip()
+
+            if not phone or not parse_phone(phone):
+                await conv.send_message(
+                    "Telefon raqam formati noto'g'ri. Faqat raqamlardan iborat xalqaro "
+                    "formatda yuboring (masalan: +998901234567). Qaytadan urinib ko'ring.",
+                    buttons=Button.clear(),
+                )
+                return
 
             user_client = TelegramClient(StringSession(), API_ID, API_HASH)
             await user_client.connect()

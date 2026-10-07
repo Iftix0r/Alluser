@@ -6,6 +6,7 @@ from crypto_utils import encrypt_session
 from database import SessionLocal
 from default_keywords import DEFAULT_DRIVER_KEYWORDS, DEFAULT_PASSENGER_KEYWORDS
 from models import (
+    AdLog,
     AdSettings,
     AdTargetGroup,
     BlockedSender,
@@ -13,8 +14,14 @@ from models import (
     ExcludedGroup,
     ExtraAccount,
     ExtraOrderGroup,
+    GreetingLog,
+    AllowedGroup,
     Keyword,
+    OrderCard,
+    OrderCardMessage,
     OrderLog,
+    SenderCooldown,
+    TeamAdmin,
     User,
 )
 
@@ -27,6 +34,9 @@ MAX_EXTRA_ORDER_GROUPS = 5
 UNLIMITED_SUBSCRIPTION_DAYS = 3650
 UNLIMITED_DISPLAY_THRESHOLD_DAYS = 3000
 _STALE_DRIVER_KEYWORDS = {"taksi"}
+
+MAX_GREETING_TEXT_LENGTH = 2000
+GREETING_COOLDOWN_DAYS = 2
 
 
 def get_user(tg_user_id: int) -> User | None:
@@ -172,6 +182,7 @@ def extend_subscription(tg_user_id: int, days: int) -> User | None:
         base = user.subscription_expires_at if user.subscription_expires_at and user.subscription_expires_at > now else now
         user.subscription_expires_at = base + timedelta(days=days)
         user.is_active = True
+        user.renewal_notice_sent_at = None
         db.commit()
         db.refresh(user)
         db.expunge(user)
@@ -382,6 +393,63 @@ def toggle_active(tg_user_id: int, active: bool) -> None:
         db.close()
 
 
+def toggle_whitelist_only_groups(tg_user_id: int, value: bool) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if user:
+            user.whitelist_only_groups = value
+            db.commit()
+    finally:
+        db.close()
+
+
+def add_allowed_group(user_id: int, chat_id: int, username: str | None, title: str | None) -> bool:
+    """Ruxsat berilgan guruhlar ro'yxatiga qo'shadi. True = yangi qo'shildi."""
+    db = SessionLocal()
+    try:
+        existing = db.query(AllowedGroup).filter_by(user_id=user_id, chat_id=chat_id).first()
+        if existing:
+            return False
+        db.add(AllowedGroup(user_id=user_id, chat_id=chat_id, username=username, title=title))
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def remove_allowed_group(user_id: int, chat_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        existing = db.query(AllowedGroup).filter_by(user_id=user_id, chat_id=chat_id).first()
+        if not existing:
+            return False
+        db.delete(existing)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def list_allowed_groups(user_id: int) -> list[AllowedGroup]:
+    db = SessionLocal()
+    try:
+        rows = db.query(AllowedGroup).filter_by(user_id=user_id).all()
+        db.expunge_all()
+        return rows
+    finally:
+        db.close()
+
+
+def get_allowed_group_ids(user_id: int) -> set[int]:
+    db = SessionLocal()
+    try:
+        rows = db.query(AllowedGroup.chat_id).filter_by(user_id=user_id).all()
+        return {row[0] for row in rows}
+    finally:
+        db.close()
+
+
 def toggle_assume_passenger(tg_user_id: int, value: bool) -> None:
     db = SessionLocal()
     try:
@@ -414,6 +482,91 @@ def get_excluded_group_ids(user_id: int) -> set[int]:
     try:
         rows = db.query(ExcludedGroup.chat_id).filter_by(user_id=user_id).all()
         return {row[0] for row in rows}
+    finally:
+        db.close()
+
+
+def exclude_group(user_id: int, chat_id: int) -> bool:
+    """Guruhni istisno (bloklangan) ro'yxatiga qo'shadi - allaqachon bo'lsa qayta qo'shmaydi.
+    True = yangi bloklandi, False = allaqachon bloklangan edi."""
+    db = SessionLocal()
+    try:
+        existing = db.query(ExcludedGroup).filter_by(user_id=user_id, chat_id=chat_id).first()
+        if existing:
+            return False
+        db.add(ExcludedGroup(user_id=user_id, chat_id=chat_id))
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def seconds_since_last_order(user_id: int, sender_id: int) -> float | None:
+    """Shu yuboruvchidan (sender) shu foydalanuvchi (user) uchun oxirgi marta
+    qachon buyurtma yuborilganini soniyada qaytaradi. Hali bo'lmagan bo'lsa - None."""
+    db = SessionLocal()
+    try:
+        row = db.query(SenderCooldown).filter_by(user_id=user_id, sender_id=sender_id).first()
+        if not row:
+            return None
+        return (datetime.utcnow() - row.last_order_at).total_seconds()
+    finally:
+        db.close()
+
+
+def mark_sender_order_sent(user_id: int, sender_id: int) -> None:
+    """Shu yuboruvchidan hozir buyurtma yuborilganini belgilaydi (cooldown uchun)."""
+    db = SessionLocal()
+    try:
+        row = db.query(SenderCooldown).filter_by(user_id=user_id, sender_id=sender_id).first()
+        if row:
+            row.last_order_at = datetime.utcnow()
+        else:
+            db.add(SenderCooldown(user_id=user_id, sender_id=sender_id, last_order_at=datetime.utcnow()))
+        db.commit()
+    finally:
+        db.close()
+
+
+def add_team_admin(user_id: int, admin_tg_id: int, admin_name: str | None = None) -> bool:
+    """Foydalanuvchiga qo'shimcha admin qo'shadi. True = yangi qo'shildi."""
+    db = SessionLocal()
+    try:
+        existing = db.query(TeamAdmin).filter_by(user_id=user_id, admin_tg_id=admin_tg_id).first()
+        if existing:
+            return False
+        db.add(TeamAdmin(user_id=user_id, admin_tg_id=admin_tg_id, admin_name=admin_name))
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def remove_team_admin(user_id: int, admin_tg_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        existing = db.query(TeamAdmin).filter_by(user_id=user_id, admin_tg_id=admin_tg_id).first()
+        if not existing:
+            return False
+        db.delete(existing)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def list_team_admins(user_id: int) -> list[TeamAdmin]:
+    db = SessionLocal()
+    try:
+        return db.query(TeamAdmin).filter_by(user_id=user_id).all()
+    finally:
+        db.close()
+
+
+def is_team_admin(user_id: int, tg_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        return db.query(TeamAdmin).filter_by(user_id=user_id, admin_tg_id=tg_id).first() is not None
     finally:
         db.close()
 
@@ -452,6 +605,40 @@ def get_expiring_soon_users(days: int = 3) -> list[User]:
         )
         db.expunge_all()
         return users
+    finally:
+        db.close()
+
+
+def get_users_needing_renewal_reminder(days: int = 3) -> list[User]:
+    """get_expiring_soon_users bilan bir xil, lekin shu muddat uchun eslatma hali
+    yuborilmagan foydalanuvchilarni qaytaradi (bir marta yuboriladi, har tekshiruvda emas)."""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        soon = now + timedelta(days=days)
+        users = (
+            db.query(User)
+            .filter(User.session_string.isnot(None))
+            .filter(User.is_active.is_(True))
+            .filter(User.subscription_expires_at.isnot(None))
+            .filter(User.subscription_expires_at > now, User.subscription_expires_at <= soon)
+            .filter(User.renewal_notice_sent_at.is_(None))
+            .order_by(User.subscription_expires_at.asc())
+            .all()
+        )
+        db.expunge_all()
+        return users
+    finally:
+        db.close()
+
+
+def mark_renewal_reminder_sent(user_id: int) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(id=user_id).first()
+        if user:
+            user.renewal_notice_sent_at = datetime.utcnow()
+            db.commit()
     finally:
         db.close()
 
@@ -618,6 +805,128 @@ def get_ad_target_group_ids(user_id: int) -> set[int]:
         db.close()
 
 
+def remove_ad_target_group(user_id: int, chat_id: int) -> bool:
+    """Reklama nishon guruhini ro'yxatdan olib tashlaydi (masalan, doimiy yetib
+    bo'lmaydigan/tark etilgan guruh uchun avtomatik tozalashda ishlatiladi)."""
+    db = SessionLocal()
+    try:
+        existing = db.query(AdTargetGroup).filter_by(user_id=user_id, chat_id=chat_id).first()
+        if not existing:
+            return False
+        db.delete(existing)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def set_greeting_text(tg_user_id: int, text: str) -> bool:
+    text = text.strip()
+    if not text or len(text) > MAX_GREETING_TEXT_LENGTH:
+        return False
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return False
+        user.greeting_text = text
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def clear_greeting_text(tg_user_id: int) -> None:
+    """Sozlangan matnni tozalaydi, standart (platforma) matniga qaytaradi."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if user:
+            user.greeting_text = None
+            db.commit()
+    finally:
+        db.close()
+
+
+def toggle_greeting_enabled(tg_user_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return True
+        user.greeting_enabled = not user.greeting_enabled
+        db.commit()
+        return user.greeting_enabled
+    finally:
+        db.close()
+
+
+def set_customer_greeting_text(tg_user_id: int, text: str) -> bool:
+    text = text.strip()
+    if not text or len(text) > MAX_GREETING_TEXT_LENGTH:
+        return False
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return False
+        user.customer_greeting_text = text
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def clear_customer_greeting_text(tg_user_id: int) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if user:
+            user.customer_greeting_text = None
+            db.commit()
+    finally:
+        db.close()
+
+
+def toggle_customer_greeting_enabled(tg_user_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return False
+        user.customer_greeting_enabled = not user.customer_greeting_enabled
+        db.commit()
+        return user.customer_greeting_enabled
+    finally:
+        db.close()
+
+
+def should_send_greeting(user_id: int, sender_id: int) -> bool:
+    """True bo'lsa, shu jo'natuvchiga oxirgi GREETING_COOLDOWN_DAYS kun ichida
+    salomlashuv yuborilmagan (yoki umuman yuborilmagan)."""
+    db = SessionLocal()
+    try:
+        row = db.query(GreetingLog).filter_by(user_id=user_id, sender_id=sender_id).first()
+        if not row:
+            return True
+        return datetime.utcnow() - row.last_sent_at >= timedelta(days=GREETING_COOLDOWN_DAYS)
+    finally:
+        db.close()
+
+
+def record_greeting_sent(user_id: int, sender_id: int) -> None:
+    db = SessionLocal()
+    try:
+        row = db.query(GreetingLog).filter_by(user_id=user_id, sender_id=sender_id).first()
+        if row:
+            row.last_sent_at = datetime.utcnow()
+        else:
+            db.add(GreetingLog(user_id=user_id, sender_id=sender_id, last_sent_at=datetime.utcnow()))
+        db.commit()
+    finally:
+        db.close()
+
+
 def update_ad_last_sent(user_id: int, when) -> None:
     db = SessionLocal()
     try:
@@ -763,6 +1072,64 @@ def get_extra_order_group_ids(user_id: int) -> list[int]:
         db.close()
 
 
+def create_order_card(user_id: int, sender_tg_id: int | None, sender_name: str | None) -> int:
+    """Yangi \"boy\" formatdagi buyurtma kartasi yozuvini yaratadi va uning id'sini qaytaradi."""
+    db = SessionLocal()
+    try:
+        card = OrderCard(user_id=user_id, sender_tg_id=sender_tg_id, sender_name=sender_name)
+        db.add(card)
+        db.commit()
+        return card.id
+    finally:
+        db.close()
+
+
+def add_order_card_message(order_card_id: int, chat_id: int, message_id: int) -> None:
+    db = SessionLocal()
+    try:
+        db.add(OrderCardMessage(order_card_id=order_card_id, chat_id=chat_id, message_id=message_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_order_card_messages(order_card_id: int) -> list[tuple[int, int]]:
+    db = SessionLocal()
+    try:
+        rows = db.query(OrderCardMessage.chat_id, OrderCardMessage.message_id).filter_by(
+            order_card_id=order_card_id
+        ).all()
+        return [(row[0], row[1]) for row in rows]
+    finally:
+        db.close()
+
+
+def close_order_card(order_card_id: int, closed_by: str) -> bool:
+    """Buyurtma kartasini yopilgan deb belgilaydi. Faqat hali ochiq bo'lsa True qaytaradi
+    (ikki marta yopilishining oldini olish uchun)."""
+    db = SessionLocal()
+    try:
+        card = db.query(OrderCard).filter_by(id=order_card_id).first()
+        if not card or card.status == "closed":
+            return False
+        card.status = "closed"
+        card.closed_at = datetime.utcnow()
+        card.closed_by = closed_by
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def is_order_card_open(order_card_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        card = db.query(OrderCard).filter_by(id=order_card_id).first()
+        return bool(card and card.status != "closed")
+    finally:
+        db.close()
+
+
 def log_order(user_id: int) -> None:
     db = SessionLocal()
     try:
@@ -779,6 +1146,64 @@ def count_orders(user_id: int, since: datetime | None = None) -> int:
         if since:
             q = q.filter(OrderLog.created_at >= since)
         return q.count()
+    finally:
+        db.close()
+
+
+def get_user_order_stats(user_id: int) -> dict:
+    """Bitta foydalanuvchi uchun bugun/7 kunda/jami yuborilgan buyurtmalar sonini qaytaradi."""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        today_start = datetime(now.year, now.month, now.day)
+        week_start = now - timedelta(days=7)
+        q = db.query(OrderLog).filter_by(user_id=user_id)
+        return {
+            "total": q.count(),
+            "today": q.filter(OrderLog.created_at >= today_start).count(),
+            "week": q.filter(OrderLog.created_at >= week_start).count(),
+        }
+    finally:
+        db.close()
+
+
+def log_ad_sent(user_id: int) -> None:
+    db = SessionLocal()
+    try:
+        db.add(AdLog(user_id=user_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_user_ad_stats(user_id: int) -> dict:
+    """Bitta foydalanuvchi uchun bugun/7 kunda/jami yuborilgan reklama xabarlari sonini qaytaradi."""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        today_start = datetime(now.year, now.month, now.day)
+        week_start = now - timedelta(days=7)
+        q = db.query(AdLog).filter_by(user_id=user_id)
+        return {
+            "total": q.count(),
+            "today": q.filter(AdLog.created_at >= today_start).count(),
+            "week": q.filter(AdLog.created_at >= week_start).count(),
+        }
+    finally:
+        db.close()
+
+
+def get_global_ad_stats() -> dict:
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        today_start = datetime(now.year, now.month, now.day)
+        week_start = now - timedelta(days=7)
+        return {
+            "total": db.query(AdLog).count(),
+            "today": db.query(AdLog).filter(AdLog.created_at >= today_start).count(),
+            "week": db.query(AdLog).filter(AdLog.created_at >= week_start).count(),
+        }
     finally:
         db.close()
 
