@@ -2268,7 +2268,12 @@ async def run_extra_account_login(bot_client: TelegramClient, manager, chat_id: 
             user = db_utils.get_user(tg_user_id)
             await manager.start_extra_client(acc, tg_user_id, user.id)
 
-            await conv.send_message(f"✅ Qo'shimcha akkaunt ({phone}) ulandi!")
+            await conv.send_message(
+                f"✅ Qo'shimcha akkaunt ({phone}) ulandi!\n\n"
+                "🔗 Endi bu akkaunt kuzatiladigan guruhlarga avtomatik qo'shilmoqda — "
+                "tugagach xabar beraman."
+            )
+            asyncio.create_task(_run_join_allowed_groups(manager, user))
     except asyncio.TimeoutError:
         await bot_client.send_message(chat_id, "Vaqt tugadi.")
     except AlreadyInConversationError:
