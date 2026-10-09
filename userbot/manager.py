@@ -849,8 +849,9 @@ class UserbotManager:
         lines.append(f"👤 {html.escape(name)}" if name else "👤 Noma'lum")
         _sender_username = getattr(sender, "username", None)
         _profile_url = f"https://t.me/{_sender_username}" if _sender_username else f"tg://user?id={sender.id}"
+        _profile_label = html.escape(name) if name else f"ID {sender.id}"
         lines.append(
-            f"🆔 ID {sender.id} · <a href=\"{_profile_url}\">profil</a>"
+            f"🆔 ID {sender.id} · <a href=\"{_profile_url}\">{_profile_label}</a>"
         )
         if phone:
             lines.append(f"📞 {html.escape(phone)}")
@@ -979,7 +980,8 @@ class UserbotManager:
                 link_row.append(Button.url("🔗 Xabarga o'tish", f"https://t.me/{chat_username}/{message.id}", style="primary"))
             _sender_uname = getattr(sender, "username", None)
             _profil_url = f"https://t.me/{_sender_uname}" if _sender_uname else f"tg://user?id={sender.id}"
-            link_row.append(Button.url("👤 Profil", _profil_url, style="primary"))
+            _profil_label = f"👤 {name}"[:40] if name else "👤 Profil"
+            link_row.append(Button.url(_profil_label, _profil_url, style="primary"))
             buttons = [
                 *([group_row] if group_row else []),
                 link_row,
