@@ -672,15 +672,32 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             return
 
         sender_label = pending.get("sender_name") or str(pending["sender_id"])
+        chat_title = pending.get("chat_title")
+        chat_username = pending.get("chat_username")
+        chat_id = pending.get("chat_id")
+
+        if chat_username:
+            group_label = f'<a href="https://t.me/{chat_username}">{html.escape(chat_title or chat_username)}</a> (@{chat_username})'
+        elif chat_title:
+            group_label = f"<b>{html.escape(chat_title)}</b> (ID: <code>{chat_id}</code>)"
+        else:
+            group_label = f"<code>{chat_id}</code>"
+
+        group_btn_label = f"🔕 Guruhni bloklash ({chat_title[:25]})" if chat_title else "🔕 Guruhni bloklash"
+
         buttons = [
             [Button.inline("🚫 Foydalanuvchini bloklash", f"act_block:{token}".encode(), style="danger")],
-            [Button.inline("🔕 Guruhni bloklash", f"act_blockgroup:{token}".encode(), style="danger")],
+            [Button.inline(group_btn_label[:64], f"act_blockgroup:{token}".encode(), style="danger")],
             [Button.inline("❌ Bekor qilish", f"act_cancel:{token}".encode())],
         ]
         await event.respond(
-            f"⚙️ <b>Amallar</b>\n\n👤 Yuboruvchi: {sender_label}\n\nNima qilmoqchisiz?",
+            f"⚙️ <b>Amallar</b>\n\n"
+            f"👤 <b>Yuboruvchi:</b> {html.escape(str(sender_label))}\n"
+            f"📍 <b>Guruh:</b> {group_label}\n\n"
+            f"Qaysi amalni bajarmoqchisiz?",
             buttons=buttons,
             parse_mode="html",
+            link_preview=False,
         )
 
     @bot_client.on(events.CallbackQuery(func=lambda e: e.is_private and e.data and e.data.startswith(b"act_")))
@@ -704,17 +721,24 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             return
 
         if action == "act_block":
+            sender_name = pending.get("sender_name") or str(pending["sender_id"])
             db_utils.block_sender(owner.tg_user_id, pending["sender_id"], pending["sender_name"])
             await event.answer("🚫 Foydalanuvchi bloklandi.")
-            await event.edit("🚫 Foydalanuvchi bloklandi. Endi undan zakaz kelmaydi.")
+            await event.edit(
+                f"🚫 Foydalanuvchi (<b>{html.escape(str(sender_name))}</b>) bloklandi.\n"
+                f"Endi undan buyurtma kelmaydi.",
+                parse_mode="html",
+            )
             return
 
         if action == "act_blockgroup":
+            chat_title = pending.get("chat_title") or str(pending["chat_id"])
             added = db_utils.exclude_group(owner.id, pending["chat_id"])
             await event.answer("🔕 Guruh bloklandi." if added else "ℹ️ Bu guruh allaqachon bloklangan edi.")
             await event.edit(
-                "🔕 Guruh bloklandi. Endi bu guruhdan zakaz kelmaydi."
-                if added else "ℹ️ Bu guruh allaqachon bloklangan edi."
+                f"🔕 Guruh bloklandi: <b>{html.escape(chat_title)}</b>\nEndi bu guruhdan buyurtma kelmaydi."
+                if added else f"ℹ️ <b>{html.escape(chat_title)}</b> guruhi allaqachon bloklangan edi.",
+                parse_mode="html",
             )
             return
 

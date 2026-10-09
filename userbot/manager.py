@@ -813,7 +813,10 @@ class UserbotManager:
                 continue
         return main  # fallback
 
-    def _create_pending_action(self, owner_user_id: int, sender, name: str | None, chat_id: int) -> str:
+    def _create_pending_action(
+        self, owner_user_id: int, sender, name: str | None, chat_id: int,
+        chat_title: str | None = None, chat_username: str | None = None
+    ) -> str:
         """Buyurtma kartasidagi \"⚙️ Amallar\" tugmasi bosilganda kerak bo'ladigan
         kontekstni (kimni yoki qaysi guruhni bloklash) tokenga bog'lab saqlaydi."""
         if len(self._pending_order_actions) >= MAX_PENDING_ORDER_ACTIONS:
@@ -827,14 +830,21 @@ class UserbotManager:
             "sender_id": sender.id,
             "sender_name": name or None,
             "chat_id": chat_id,
+            "chat_title": chat_title or None,
+            "chat_username": chat_username or None,
         }
         return token
 
-    def _build_action_button(self, owner_user_id: int, sender, name: str | None, chat_id: int) -> list:
+    def _build_action_button(
+        self, owner_user_id: int, sender, name: str | None, chat_id: int,
+        chat_title: str | None = None, chat_username: str | None = None
+    ) -> list:
         """Buyurtma kartasiga qo'yiladigan yagona \"⚙️ Amallar\" tugmasini yaratadi -
         bosilganda botga (shaxsiy chatga) o'tkazadi, u yerda faqat egasi uchun
         amallar menyusi (bloklash va h.k.) ko'rsatiladi."""
-        token = self._create_pending_action(owner_user_id, sender, name, chat_id)
+        token = self._create_pending_action(
+            owner_user_id, sender, name, chat_id, chat_title, chat_username
+        )
         url = f"https://t.me/{self.bot_username}?start=act_{token}"
         return [Button.url("⚙️ Amallar", url, style="primary")]
 
@@ -874,7 +884,7 @@ class UserbotManager:
             [Button.inline("✅ Zakazni yopish", f"close:{order_card_id}".encode(), style="success")]
         )
         rows.append(
-            self._build_action_button(owner_user_id, sender, name, message.chat_id)
+            self._build_action_button(owner_user_id, sender, name, message.chat_id, chat_title, chat_username)
         )
         return order_text, rows
 
@@ -956,7 +966,7 @@ class UserbotManager:
                 order_card_id, name, phone, text, chat_title, chat_username, message, sender, current.id
             )
         else:
-            fields = [f"🔑 Kalit so'z: {html.escape(matched)}"]
+            fields = []
             if name:
                 fields.append(f"👤 Ism: {html.escape(name)}")
             if username:
@@ -981,7 +991,7 @@ class UserbotManager:
             link_row.append(Button.url(_profil_label, _profil_url, style="primary"))
             buttons = [
                 link_row,
-                self._build_action_button(current.id, sender, name, message.chat_id),
+                self._build_action_button(current.id, sender, name, message.chat_id, chat_title, chat_username),
             ]
 
         sent_to_main = False
