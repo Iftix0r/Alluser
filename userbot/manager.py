@@ -391,7 +391,40 @@ class UserbotManager:
 
         self.extra_clients[acc_id] = client
         logger.info("Extra userbot ishga tushdi: phone=%s, user=%s", acc.phone, tg_user_id)
+
+        try:
+            await self.sync_extra_account_groups(client, user_db_id)
+        except Exception:
+            logger.exception("Guruhlarni sinxronlashda xatolik: extra_acc=%s", acc.id)
+
         return True
+
+    async def sync_extra_account_groups(self, client: TelegramClient, user_db_id: int) -> int:
+        """Qo'shimcha akkaunt a'zo bo'lgan barcha guruhlarni kuzatiladigan guruhlar
+        ro'yxatiga (AllowedGroup) kiritadi va agar istisnoda bo'lsa chiqaradi."""
+        added_count = 0
+        try:
+            async for dialog in client.iter_dialogs():
+                if not dialog.is_group:
+                    continue
+                chat_id = dialog.id
+                title = dialog.name
+                username = getattr(dialog.entity, "username", None)
+                await asyncio.to_thread(db_utils.unexclude_group, user_db_id, chat_id)
+                added = await asyncio.to_thread(
+                    db_utils.add_allowed_group, user_db_id, chat_id, username, title
+                )
+                if added:
+                    added_count += 1
+            if added_count > 0:
+                logger.info(
+                    "Extra akkauntdan %s ta yangi guruh kuzatuvga qo'shildi: user_db_id=%s",
+                    added_count,
+                    user_db_id,
+                )
+        except Exception:
+            logger.exception("Extra akkaunt guruhlarini sinxronlashda xatolik: user_db_id=%s", user_db_id)
+        return added_count
 
     async def stop_extra_client(self, acc_id: int) -> None:
         client = self.extra_clients.pop(acc_id, None)

@@ -379,23 +379,45 @@ GROUPS_PAGE_LIMIT = 50
 
 
 async def send_groups_list(respond, manager, user) -> None:
-    client = manager.clients.get(user.id)
-    if not client:
+    main_client = manager.clients.get(user.id)
+    extra_clients = [
+        manager.extra_clients.get(acc.id)
+        for acc in db_utils.list_extra_accounts_by_user_db_id(user.id)
+        if manager.extra_clients.get(acc.id)
+    ]
+    all_clients = ([main_client] if main_client and main_client.is_connected() else []) + [
+        c for c in extra_clients if c.is_connected()
+    ]
+    if not all_clients:
         await respond("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
         return
 
     excluded = db_utils.get_excluded_group_ids(user.id)
     buttons = []
     seen_chat_ids = set()
-    async for dialog in client.iter_dialogs(limit=200):
-        if not dialog.is_group:
-            continue
-        seen_chat_ids.add(dialog.id)
-        is_excluded = dialog.id in excluded
-        mark = "🔕" if is_excluded else "🔔"
-        label = f"{mark} {dialog.name}"[:64]
-        style = "danger" if is_excluded else "success"
-        buttons.append([Button.inline(label, f"toggexc:{dialog.id}".encode(), style=style)])
+
+    for c in all_clients:
+        try:
+            async for dialog in c.iter_dialogs(limit=200):
+                if not dialog.is_group:
+                    continue
+                if dialog.id in seen_chat_ids:
+                    continue
+                seen_chat_ids.add(dialog.id)
+                # Bazaga ham ruxsat etilgan guruh sifatida kiritib ketish
+                username = getattr(dialog.entity, "username", None)
+                await asyncio.to_thread(
+                    db_utils.add_allowed_group, user.id, dialog.id, username, dialog.name
+                )
+                is_excluded = dialog.id in excluded
+                mark = "🔕" if is_excluded else "🔔"
+                label = f"{mark} {dialog.name}"[:64]
+                style = "danger" if is_excluded else "success"
+                buttons.append([Button.inline(label, f"toggexc:{dialog.id}".encode(), style=style)])
+                if len(buttons) >= GROUPS_PAGE_LIMIT:
+                    break
+        except Exception:
+            logger.exception("Dialoglarni olishda xatolik: user=%s", user.tg_user_id)
         if len(buttons) >= GROUPS_PAGE_LIMIT:
             break
 
