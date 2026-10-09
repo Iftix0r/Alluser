@@ -972,9 +972,6 @@ class UserbotManager:
             message_lines.append(f"💬 Xabar:\n<b><i>{html.escape(text)}</i></b>")
             order_text = "\n".join(message_lines)
 
-            group_row = []
-            if chat_username:
-                group_row.append(Button.url(f"📍 {chat_title or 'Guruh'}", f"https://t.me/{chat_username}", style="primary"))
             link_row = []
             if chat_username:
                 link_row.append(Button.url("🔗 Xabarga o'tish", f"https://t.me/{chat_username}/{message.id}", style="primary"))
@@ -983,7 +980,6 @@ class UserbotManager:
             _profil_label = f"👤 {name}"[:40] if name else "👤 Profil"
             link_row.append(Button.url(_profil_label, _profil_url, style="primary"))
             buttons = [
-                *([group_row] if group_row else []),
                 link_row,
                 self._build_action_button(current.id, sender, name, message.chat_id),
             ]
