@@ -968,18 +968,18 @@ class UserbotManager:
         else:
             fields = []
             if name:
-                fields.append(f"👤 Ism: {html.escape(name)}")
+                fields.append(f"👤 {html.escape(name)}")
             if username:
-                fields.append(f"🔗 Username: {html.escape(username)}")
+                fields.append(f"🔗 {html.escape(username)}")
             if phone:
-                fields.append(f"📞 Telefon: {html.escape(phone)}")
+                fields.append(f"📞 {html.escape(phone)}")
             if chat_title and not chat_username:
-                fields.append(f"📍 Guruh: {html.escape(chat_title)}")
+                fields.append(f"📍 {html.escape(chat_title)}")
 
-            message_lines = ["🚕 Yangi buyurtma!", ""]
+            message_lines = []
             for field in fields:
                 message_lines += [field, ""]
-            message_lines.append(f"💬 Xabar:\n<b><i>{html.escape(text)}</i></b>")
+            message_lines.append(f"💬\n<b><i>{html.escape(text)}</i></b>")
             order_text = "\n".join(message_lines)
 
             link_row = []
