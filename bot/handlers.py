@@ -375,10 +375,12 @@ def format_status(user) -> str:
     )
 
 
-GROUPS_PAGE_LIMIT = 50
+GROUPS_PAGE_SIZE = 10
 
 
-async def send_groups_list(respond, manager, user) -> None:
+async def _collect_groups_for_user(manager, user) -> list[tuple[int, str, str | None]]:
+    """Barcha ulangan akkauntlardan guruhlar ro'yxatini to'playdi va bazaga saqlaydi.
+    Qaytaradi: [(chat_id, name, username), ...]"""
     main_client = manager.clients.get(user.id)
     extra_clients = [
         manager.extra_clients.get(acc.id)
@@ -388,69 +390,96 @@ async def send_groups_list(respond, manager, user) -> None:
     all_clients = ([main_client] if main_client and main_client.is_connected() else []) + [
         c for c in extra_clients if c.is_connected()
     ]
-    if not all_clients:
-        await respond("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
-        return
 
-    excluded = db_utils.get_excluded_group_ids(user.id)
-    buttons = []
-    seen_chat_ids = set()
+    seen_chat_ids: set[int] = set()
+    groups: list[tuple[int, str, str | None]] = []
 
     for c in all_clients:
         try:
             async for dialog in c.iter_dialogs(limit=200):
-                if not dialog.is_group:
-                    continue
-                if dialog.id in seen_chat_ids:
+                if not dialog.is_group or dialog.id in seen_chat_ids:
                     continue
                 seen_chat_ids.add(dialog.id)
-                # Bazaga ham ruxsat etilgan guruh sifatida kiritib ketish
-                username = getattr(dialog.entity, "username", None)
+                uname = getattr(dialog.entity, "username", None)
                 await asyncio.to_thread(
-                    db_utils.add_allowed_group, user.id, dialog.id, username, dialog.name
+                    db_utils.add_allowed_group, user.id, dialog.id, uname, dialog.name
                 )
-                is_excluded = dialog.id in excluded
-                mark = "🔕" if is_excluded else "🔔"
-                label = f"{mark} {dialog.name}"[:64]
-                style = "danger" if is_excluded else "success"
-                buttons.append([Button.inline(label, f"toggexc:{dialog.id}".encode(), style=style)])
-                if len(buttons) >= GROUPS_PAGE_LIMIT:
-                    break
+                groups.append((dialog.id, dialog.name, uname))
         except Exception:
             logger.exception("Dialoglarni olishda xatolik: user=%s", user.tg_user_id)
-        if len(buttons) >= GROUPS_PAGE_LIMIT:
-            break
 
-    # Ruxsat berilgan (qo'lda qo'shilgan) guruhlar dialoglarda chiqmagan bo'lsa ham qo'shish
-    allowed_groups = db_utils.list_allowed_groups(user.id)
-    for g in allowed_groups:
-        if g.chat_id not in seen_chat_ids and len(buttons) < GROUPS_PAGE_LIMIT:
+    # Bazadagi guruhlar dialoglarda chiqmagan bo'lsa ham qo'shish
+    for g in db_utils.list_allowed_groups(user.id):
+        if g.chat_id not in seen_chat_ids:
             seen_chat_ids.add(g.chat_id)
-            is_excluded = g.chat_id in excluded
-            mark = "🔕" if is_excluded else "🔔"
-            label = f"{mark} {g.title or g.username or g.chat_id}"[:64]
-            style = "danger" if is_excluded else "success"
-            buttons.append([Button.inline(label, f"toggexc:{g.chat_id}".encode(), style=style)])
+            groups.append((g.chat_id, g.title or g.username or str(g.chat_id), g.username))
 
-    action_buttons = [
-        [Button.inline("➕ Guruh qo'shish", b"add_monitored_group", style="success")],
-        [Button.inline("« Menyu", b"menu", style="primary")],
-    ]
+    return groups
 
-    if not buttons:
+
+def _build_groups_page(
+    groups: list[tuple[int, str, str | None]],
+    excluded: set[int],
+    page: int,
+) -> tuple[str, list]:
+    """Sahifalangan guruhlar menyusini qaytaradi."""
+    total = len(groups)
+    total_pages = max(1, (total + GROUPS_PAGE_SIZE - 1) // GROUPS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * GROUPS_PAGE_SIZE
+    page_items = groups[start : start + GROUPS_PAGE_SIZE]
+
+    text = (
+        f"🗂 Kuzatiladigan guruhlar (sahifa {page + 1}/{total_pages}, jami {total} ta)\n\n"
+        "🔔 = kuzatiladi, 🔕 = kuzatilmaydi. Holatni almashtirish uchun guruh nomini bosing:"
+    )
+
+    buttons = []
+    for chat_id, name, _ in page_items:
+        is_excluded = chat_id in excluded
+        mark = "🔕" if is_excluded else "🔔"
+        label = f"{mark} {name}"[:60]
+        style = "danger" if is_excluded else "success"
+        buttons.append([Button.inline(label, f"toggexc:{chat_id}:{page}".encode(), style=style)])
+
+    # Navigatsiya qatori
+    nav = []
+    if page > 0:
+        nav.append(Button.inline("◀ Oldingi", f"groups_page:{page - 1}".encode(), style="primary"))
+    if page < total_pages - 1:
+        nav.append(Button.inline("Keyingi ▶", f"groups_page:{page + 1}".encode(), style="primary"))
+    if nav:
+        buttons.append(nav)
+
+    buttons.append([Button.inline("➕ Guruh qo'shish", b"add_monitored_group", style="success")])
+    buttons.append([Button.inline("« Menyu", b"menu", style="primary")])
+    return text, buttons
+
+
+async def send_groups_list(respond, manager, user, page: int = 0) -> None:
+    main_client = manager.clients.get(user.id)
+    extra_accs = db_utils.list_extra_accounts_by_user_db_id(user.id)
+    any_extra = any(manager.extra_clients.get(acc.id) for acc in extra_accs)
+    if not main_client and not any_extra:
+        await respond("Userbot hali ishga tushmagan. Birozdan so'ng qayta urinib ko'ring.")
+        return
+
+    groups = await _collect_groups_for_user(manager, user)
+
+    if not groups:
         await respond(
             "🗂 Sizda hali kuzatiladigan guruhlar mavjud emas.\n\n"
             "Yangi guruhni havola yoki ID raqami orqali ulash uchun \"➕ Guruh qo'shish\" tugmasini bosing:",
-            buttons=action_buttons,
+            buttons=[
+                [Button.inline("➕ Guruh qo'shish", b"add_monitored_group", style="success")],
+                [Button.inline("« Menyu", b"menu", style="primary")],
+            ],
         )
         return
 
-    buttons.extend(action_buttons)
-    await respond(
-        "🔔 = kuzatiladi, 🔕 = kuzatilmaydi. Holatni almashtirish uchun guruh nomini bosing:\n\n"
-        "➕ Yangi guruh ulash uchun \"➕ Guruh qo'shish\" tugmasini bosing:",
-        buttons=buttons,
-    )
+    excluded = db_utils.get_excluded_group_ids(user.id)
+    text, buttons = _build_groups_page(groups, excluded, page)
+    await respond(text, buttons=buttons)
 
 
 def blocked_list_view(tg_user_id: int) -> tuple[str, list]:
@@ -1377,7 +1406,15 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
 
     elif data == b"groups_menu":
         await event.answer()
-        await send_groups_list(event.respond, manager, user)
+        await send_groups_list(event.respond, manager, user, page=0)
+
+    elif data.startswith(b"groups_page:"):
+        page = int(data[len(b"groups_page:"):])
+        await event.answer()
+        groups = await _collect_groups_for_user(manager, user)
+        excluded = db_utils.get_excluded_group_ids(user.id)
+        text, buttons = _build_groups_page(groups, excluded, page)
+        await event.edit(text, buttons=buttons)
 
     elif data == b"add_monitored_group":
         await event.answer()
@@ -1429,25 +1466,17 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
             await event.respond(BUSY_TEXT)
 
     elif data.startswith(b"toggexc:"):
-        chat_id = int(data[len(b"toggexc:"):])
+        parts = data[len(b"toggexc:"):].split(b":")
+        chat_id = int(parts[0])
+        page = int(parts[1]) if len(parts) > 1 else 0
         now_excluded = db_utils.toggle_excluded_group(user.id, chat_id)
         await event.answer("🔕 Kuzatishdan chiqarildi" if now_excluded else "🔔 Kuzatishga qo'shildi")
+        # Sahifani qayta yuklash (holat o'zgargani uchun)
         try:
-            msg = await event.get_message()
-            if msg and msg.buttons:
-                new_buttons = []
-                for row in msg.buttons:
-                    new_row = []
-                    for btn in row:
-                        if btn.data == data:
-                            clean_text = btn.text.lstrip("🔔🔕 ")
-                            new_mark = "🔕" if now_excluded else "🔔"
-                            new_style = "danger" if now_excluded else "success"
-                            new_row.append(Button.inline(f"{new_mark} {clean_text}"[:64], data, style=new_style))
-                        else:
-                            new_row.append(btn)
-                    new_buttons.append(new_row)
-                await event.edit(buttons=new_buttons)
+            groups = await _collect_groups_for_user(manager, user)
+            excluded = db_utils.get_excluded_group_ids(user.id)
+            text, buttons = _build_groups_page(groups, excluded, page)
+            await event.edit(text, buttons=buttons)
         except Exception:
             pass
 
