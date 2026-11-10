@@ -789,6 +789,9 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             return
         words = parse_words(raw)
         results = {w: db_utils.add_keyword(event.sender_id, w) for w in words}
+        user = db_utils.get_user(event.sender_id)
+        if user:
+            manager.invalidate_monitoring_filters(user.id)
         await event.respond(summarize_add_results(results))
 
     @bot_client.on(events.NewMessage(pattern=r"/delkeyword(?: (.+))?", func=lambda e: e.is_private))
@@ -799,6 +802,9 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             return
         words = parse_words(raw)
         results = {w: db_utils.remove_keyword(event.sender_id, w) for w in words}
+        user = db_utils.get_user(event.sender_id)
+        if user:
+            manager.invalidate_monitoring_filters(user.id)
         await event.respond(summarize_remove_results(results))
 
     @bot_client.on(events.NewMessage(pattern="/keywords", func=lambda e: e.is_private))
@@ -817,6 +823,9 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             return
         words = parse_words(raw)
         results = {w: db_utils.add_driver_keyword(event.sender_id, w) for w in words}
+        user = db_utils.get_user(event.sender_id)
+        if user:
+            manager.invalidate_monitoring_filters(user.id)
         await event.respond(summarize_add_results(results))
 
     @bot_client.on(events.NewMessage(pattern=r"/deldriverkeyword(?: (.+))?", func=lambda e: e.is_private))
@@ -827,6 +836,9 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
             return
         words = parse_words(raw)
         results = {w: db_utils.remove_driver_keyword(event.sender_id, w) for w in words}
+        user = db_utils.get_user(event.sender_id)
+        if user:
+            manager.invalidate_monitoring_filters(user.id)
         await event.respond(summarize_remove_results(results))
 
     @bot_client.on(events.NewMessage(pattern="/driverkeywords", func=lambda e: e.is_private))
@@ -1181,6 +1193,10 @@ def register_handlers(bot_client: TelegramClient, manager, bot_username: str) ->
                 await event.answer(GENERIC_ERROR_TEXT, alert=True)
             except Exception:
                 await event.respond(GENERIC_ERROR_TEXT)
+        finally:
+            # Kalit so'z yoki guruh sozlamasi o'zgargan bo'lishi mumkin; keyingi
+            # kelgan xabar yangilangan filtrlarni darhol oladi.
+            manager.invalidate_monitoring_filters(user.id)
 
 
 async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager, bot_username: str) -> None:

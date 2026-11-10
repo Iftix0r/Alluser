@@ -28,6 +28,17 @@ USERS_TABLE_MIGRATIONS = [
     ),
 ]
 
+# Ko'p ishlatiladigan filter va statistika so'rovlarini katta bazada ham tez saqlaydi.
+# IF NOT EXISTS sababli har ishga tushishda xavfsiz tekshiriladi.
+INDEX_MIGRATIONS = [
+    "CREATE INDEX IF NOT EXISTS ix_keywords_user_id ON keywords (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_driver_keywords_user_id ON driver_keywords (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_excluded_groups_user_chat ON excluded_groups (user_id, chat_id)",
+    "CREATE INDEX IF NOT EXISTS ix_order_logs_user_created ON order_logs (user_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_ad_logs_user_created ON ad_logs (user_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_order_card_messages_card ON order_card_messages (order_card_id)",
+]
+
 # customer_greeting_enabled ustuni bir necha marta standart qiymati o'zgargan:
 # boshida o'chirilgan, keyin "hammada yoqilgan" qilingan, endi yana o'chirilganga qaytarildi
 # (har bir foydalanuvchi panel orqali o'zi yoqadi) — mavjud qatorlar uchun bir martalik tuzatish.
@@ -63,7 +74,14 @@ def _apply_one_time_data_fixes():
             conn.execute(text("INSERT INTO applied_data_fixes (name) VALUES (:name)"), {"name": name})
 
 
+def _create_performance_indexes():
+    with engine.begin() as conn:
+        for sql in INDEX_MIGRATIONS:
+            conn.execute(text(sql))
+
+
 def init_db():
     Base.metadata.create_all(engine)
     _migrate_add_missing_columns()
     _apply_one_time_data_fixes()
+    _create_performance_indexes()

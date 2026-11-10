@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT_COUNT = 20
 RATE_LIMIT_WINDOW_SECONDS = 60
 NEW_MEMBER_DEDUP_SECONDS = 60
+MONITORING_FILTER_CACHE_SECONDS = 5
 
 CATCHUP_ORDER_LIMIT = 20
 CATCHUP_MESSAGES_PER_GROUP = 30
@@ -153,6 +154,11 @@ class UserbotManager:
         # Bir guruhni asosiy va qo'shimcha akkauntlar birga kuzatsa, ayni a'zo haqida
         # buyurtma guruhiga bir necha marta xabar ketmasligi uchun qisqa muddatli kesh.
         self._new_member_events: dict[tuple[int, int, int], float] = {}
+        # Yuqori trafikli guruhlarda har bir xabar uchun bir xil DB ro'yxatlarini
+        # qayta o'qimaslik uchun: user_db_id -> (expires_at, filters).
+        self._monitoring_filter_cache: dict[
+            int, tuple[float, tuple[set[int], list[str], list[str]]]
+        ] = {}
 
     def enter_bulk_allow(self, tg_user_id: int) -> None:
         self._bulk_allow_mode.add(tg_user_id)
@@ -299,6 +305,24 @@ class UserbotManager:
         times.append(now)
         return False
 
+    async def _get_monitoring_filters(
+        self, user_db_id: int
+    ) -> tuple[set[int], list[str], list[str]]:
+        now = time.monotonic()
+        cached = self._monitoring_filter_cache.get(user_db_id)
+        if cached and cached[0] > now:
+            return cached[1]
+        filters = await asyncio.to_thread(db_utils.get_monitoring_filters, user_db_id)
+        self._monitoring_filter_cache[user_db_id] = (
+            now + MONITORING_FILTER_CACHE_SECONDS,
+            filters,
+        )
+        return filters
+
+    def invalidate_monitoring_filters(self, user_db_id: int) -> None:
+        """Sozlama o'zgarganda keshni darhol yangilash uchun tashqi hook."""
+        self._monitoring_filter_cache.pop(user_db_id, None)
+
     async def start_client_for_user(self, user) -> bool:
         if user.id in self.clients:
             return True
@@ -356,6 +380,7 @@ class UserbotManager:
     async def stop_client_for_user(self, user_db_id: int) -> None:
         client = self.clients.pop(user_db_id, None)
         self._forward_times.pop(user_db_id, None)
+        self._monitoring_filter_cache.pop(user_db_id, None)
         if client:
             await client.disconnect()
         # Extra akkauntlarni ham to'xtatish
@@ -627,9 +652,7 @@ class UserbotManager:
         if not db_utils.is_subscription_active(current):
             return
 
-        excluded, keywords, driver_keywords = await asyncio.to_thread(
-            db_utils.get_monitoring_filters, user_db_id
-        )
+        excluded, keywords, driver_keywords = await self._get_monitoring_filters(user_db_id)
 
         await self._process_message(event, current, keywords, driver_keywords, excluded)
 
