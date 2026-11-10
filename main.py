@@ -10,6 +10,7 @@ from bot.handlers import register_handlers
 from config import API_HASH, API_ID, BOT_TOKEN
 from database import init_db
 from db_utils import remove_stale_driver_keywords, seed_default_keywords_for_existing_users
+from health_monitor import health_monitor_loop
 from userbot.manager import UserbotManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -95,6 +96,7 @@ async def main() -> None:
     sweep_task = asyncio.create_task(subscription_sweep_loop(manager))
     ad_task = asyncio.create_task(ad_broadcast_loop(manager))
     renewal_task = asyncio.create_task(renewal_reminder_loop(manager))
+    health_task = asyncio.create_task(health_monitor_loop(bot_client))
 
     logger.info("Bot ishga tushdi.")
     try:
@@ -104,6 +106,7 @@ async def main() -> None:
         sweep_task.cancel()
         ad_task.cancel()
         renewal_task.cancel()
+        health_task.cancel()
         for user_db_id in list(manager.clients):
             await manager.stop_client_for_user(user_db_id)
         lock_file.close()

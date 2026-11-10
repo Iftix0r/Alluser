@@ -8,6 +8,7 @@ from telethon.tl.custom import Button
 
 import db_utils
 from config import ADMIN_IDS
+from health_monitor import format_health, get_server_health_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ def admin_menu_buttons() -> list:
         [Button.inline("⏳ Muddati tugayotganlar", b"admin_expiring", style="primary")],
         [Button.inline("📢 Xabar yuborish", b"admin_broadcast", style="primary")],
         [Button.inline("📊 Statistika", b"admin_stats", style="primary")],
+        [Button.inline("🖥 Server holati", b"admin_server_health", style="primary")],
     ]
 
 
@@ -164,6 +166,11 @@ async def _dispatch_admin_callback(event, manager) -> None:
                 lines.append(f"- {label}: {cnt} ta buyurtma")
         await event.answer()
         await event.respond("\n".join(lines))
+
+    elif data == b"admin_server_health":
+        health = await asyncio.to_thread(get_server_health_snapshot)
+        await event.answer()
+        await event.respond(format_health(health), parse_mode="html")
 
     elif data == b"admin_search":
         await event.answer()

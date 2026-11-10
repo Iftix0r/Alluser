@@ -19,3 +19,11 @@ ADMIN_CONTACT_ID = int(os.environ.get("ADMIN_CONTACT_ID", "2114098498"))
 # Bitta yuboruvchidan ketma-ket buyurtmalar orasidagi eng kam vaqt (soniyada).
 # Shu vaqt ichida yana xabar kelsa, buyurtma sifatida qabul qilinmaydi.
 SENDER_COOLDOWN_SECONDS = int(os.environ.get("SENDER_COOLDOWN_SECONDS", "180"))
+
+# Server sog'lig'i monitoringi. Load foizi 1 daqiqalik system load / CPU yadrolari.
+HEALTH_CHECK_INTERVAL_SECONDS = int(os.environ.get("HEALTH_CHECK_INTERVAL_SECONDS", "60"))
+HEALTH_CONSECUTIVE_CHECKS = int(os.environ.get("HEALTH_CONSECUTIVE_CHECKS", "3"))
+HEALTH_LOAD_THRESHOLD_PERCENT = float(os.environ.get("HEALTH_LOAD_THRESHOLD_PERCENT", "90"))
+HEALTH_MEMORY_THRESHOLD_PERCENT = float(os.environ.get("HEALTH_MEMORY_THRESHOLD_PERCENT", "90"))
+HEALTH_DISK_THRESHOLD_PERCENT = float(os.environ.get("HEALTH_DISK_THRESHOLD_PERCENT", "90"))
+HEALTH_EVENT_LOOP_LAG_SECONDS = float(os.environ.get("HEALTH_EVENT_LOOP_LAG_SECONDS", "10"))

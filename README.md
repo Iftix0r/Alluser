@@ -17,6 +17,7 @@ Telegram userbot tizimi: foydalanuvchilar botga `/start` bosib o'z Telegram akka
 - **Akkaunt/guruhni uzish**: `/logout` (tasdiqlash bilan) va `/removegroup` orqali bekor qilish mumkin.
 - **Pullik obuna va admin panel**: yangi foydalanuvchilarga avtomatik bepul sinov muddati beriladi, muddati tugagach kuzatish avtomatik to'xtaydi; admin `/admin` orqali foydalanuvchilarni ko'rib, obuna qo'shib/to'xtatib turadi.
 - **Admin nazorati**: admin har bir foydalanuvchi uchun yangi a'zo bildirishnomasini alohida yoqishi yoki o'chirishi va umumiy statistikada nechta akkauntda yoqilganini ko'rishi mumkin.
+- **Server monitoringi**: CPU/load, RAM, disk va botning ichki kechikishi kuzatiladi; server kuchi yetishmasa `ADMIN_IDS` dagi adminlarga avtomatik ogohlantirish, tiklanganda esa qayta xabar yuboriladi. Admin paneldagi “Server holati” tugmasi orqali ko'rsatkichlarni qo'lda ham ko'rish mumkin.
 
 ## Talablar
 
