@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 RATE_LIMIT_COUNT = 20
 RATE_LIMIT_WINDOW_SECONDS = 60
+NEW_MEMBER_DEDUP_SECONDS = 60
 
 CATCHUP_ORDER_LIMIT = 20
 CATCHUP_MESSAGES_PER_GROUP = 30
@@ -149,6 +150,9 @@ class UserbotManager:
         # user_db_id lar to'plami - hozir "Guruhlarga qo'shilish" fon vazifasi
         # ishlab turgan (qayta bosilganda ikki marta ishga tushmasligi uchun).
         self._joining_allowed_groups: set[int] = set()
+        # Bir guruhni asosiy va qo'shimcha akkauntlar birga kuzatsa, ayni a'zo haqida
+        # buyurtma guruhiga bir necha marta xabar ketmasligi uchun qisqa muddatli kesh.
+        self._new_member_events: dict[tuple[int, int, int], float] = {}
 
     def enter_bulk_allow(self, tg_user_id: int) -> None:
         self._bulk_allow_mode.add(tg_user_id)
@@ -341,6 +345,10 @@ class UserbotManager:
         async def handler(event, user_db_id=user_db_id, tg_user_id=tg_user_id):
             await self._handle_message(event, user_db_id, tg_user_id)
 
+        @client.on(events.ChatAction())
+        async def new_member_handler(event, user_db_id=user_db_id):
+            await self._handle_new_members(event, user_db_id)
+
         self.clients[user.id] = client
         logger.info("Userbot ishga tushdi: tg_user_id=%s", tg_user_id)
         return True
@@ -388,6 +396,10 @@ class UserbotManager:
         @client.on(events.NewMessage(incoming=True))
         async def handler(event, user_db_id=user_db_id, tg_user_id=tg_user_id):
             await self._handle_message(event, user_db_id, tg_user_id)
+
+        @client.on(events.ChatAction())
+        async def new_member_handler(event, user_db_id=user_db_id):
+            await self._handle_new_members(event, user_db_id)
 
         self.extra_clients[acc_id] = client
         logger.info("Extra userbot ishga tushdi: phone=%s, user=%s", acc.phone, tg_user_id)
@@ -620,6 +632,83 @@ class UserbotManager:
         driver_keywords = await asyncio.to_thread(db_utils.list_driver_keywords, tg_user_id)
 
         await self._process_message(event, current, keywords, driver_keywords, excluded)
+
+    async def _handle_new_members(self, event, user_db_id: int) -> None:
+        """Kuzatiladigan guruhga yangi a'zo kirsa, buyurtma guruhlariga xabar beradi."""
+        if not event.is_group or not (event.user_added or event.user_joined):
+            return
+
+        current = await asyncio.to_thread(db_utils.find_user_by_id, user_db_id)
+        if not current or not current.is_active or not current.order_group_id:
+            return
+        if not db_utils.is_subscription_active(current):
+            return
+
+        excluded = await asyncio.to_thread(db_utils.get_excluded_group_ids, user_db_id)
+        if event.chat_id in excluded:
+            return
+        if current.whitelist_only_groups:
+            allowed = await asyncio.to_thread(db_utils.get_allowed_group_ids, user_db_id)
+            if event.chat_id not in allowed:
+                return
+
+        try:
+            members = await event.get_users()
+        except (RPCError, ValueError):
+            logger.warning(
+                "Yangi a'zolar ma'lumotini olib bo'lmadi: user=%s, chat=%s",
+                current.tg_user_id,
+                event.chat_id,
+            )
+            return
+
+        chat = await event.get_chat()
+        chat_title = getattr(chat, "title", None) or "Noma'lum guruh"
+        extra_group_ids = await asyncio.to_thread(db_utils.get_extra_order_group_ids, current.id)
+        destination_ids = [current.order_group_id, *extra_group_ids]
+
+        now = time.monotonic()
+        self._new_member_events = {
+            key: seen_at
+            for key, seen_at in self._new_member_events.items()
+            if now - seen_at < NEW_MEMBER_DEDUP_SECONDS
+        }
+
+        for member in members:
+            if not member or getattr(member, "bot", False):
+                continue
+            dedup_key = (current.id, event.chat_id, member.id)
+            if dedup_key in self._new_member_events:
+                continue
+            self._new_member_events[dedup_key] = now
+
+            name = " ".join(
+                filter(None, [getattr(member, "first_name", None), getattr(member, "last_name", None)])
+            ) or f"ID {member.id}"
+            username = getattr(member, "username", None)
+            profile_url = f"https://t.me/{username}" if username else f"tg://user?id={member.id}"
+            text = (
+                "🆕 <b>Yangi a'zo</b>\n\n"
+                f"👤 <a href=\"{profile_url}\">{html.escape(name)}</a>\n"
+                f"📍 Guruh: {html.escape(chat_title)}"
+            )
+            buttons = [[Button.url("👤 Profilga kirish", profile_url, style="primary")]]
+
+            for destination_id in destination_ids:
+                try:
+                    await self.bot_client.send_message(
+                        destination_id,
+                        text,
+                        buttons=buttons,
+                        link_preview=False,
+                        parse_mode="html",
+                    )
+                except (RPCError, ValueError):
+                    logger.exception(
+                        "Yangi a'zo xabari buyurtma guruhiga yuborilmadi: user=%s, destination=%s",
+                        current.tg_user_id,
+                        destination_id,
+                    )
 
     async def _maybe_send_greeting(self, event, user_db_id: int, tg_user_id: int) -> None:
         """Shaxsiy chatga kimdir yozganda (yangi odam yoki GREETING_COOLDOWN_DAYS'dan
