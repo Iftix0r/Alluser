@@ -654,18 +654,19 @@ class UserbotManager:
 
         try:
             members = await event.get_users()
+            chat = await event.get_chat()
         except (RPCError, ValueError):
             logger.warning(
-                "Yangi a'zolar ma'lumotini olib bo'lmadi: user=%s, chat=%s",
+                "Yangi a'zo yoki guruh ma'lumotini olib bo'lmadi: user=%s, chat=%s",
                 current.tg_user_id,
                 event.chat_id,
             )
             return
 
-        chat = await event.get_chat()
         chat_title = getattr(chat, "title", None) or "Noma'lum guruh"
         extra_group_ids = await asyncio.to_thread(db_utils.get_extra_order_group_ids, current.id)
-        destination_ids = [current.order_group_id, *extra_group_ids]
+        # Bazadagi eski yoki qo'lda kiritilgan takroriy manzillar ham bir marta ishlansin.
+        destination_ids = list(dict.fromkeys([current.order_group_id, *extra_group_ids]))
 
         now = time.monotonic()
         self._new_member_events = {
@@ -674,8 +675,9 @@ class UserbotManager:
             if now - seen_at < NEW_MEMBER_DEDUP_SECONDS
         }
 
-        for member in members:
-            if not member or getattr(member, "bot", False):
+        for member in members or []:
+            # Userbotning o'zi yangi guruhga qo'shilganda bu mijoz sifatida chiqmasin.
+            if not member or getattr(member, "bot", False) or getattr(member, "is_self", False):
                 continue
             dedup_key = (current.id, event.chat_id, member.id)
             if dedup_key in self._new_member_events:

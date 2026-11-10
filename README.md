@@ -9,6 +9,7 @@ Telegram userbot tizimi: foydalanuvchilar botga `/start` bosib o'z Telegram akka
 - **Kalit so'z bo'yicha aniqlash**: xabar matnidan kalit so'z va telefon raqami (regex bilan) ajratib olinadi.
 - **Guruhlarni tanlab kuzatish**: `/groups` orqali istalmagan guruhlarni kuzatishdan chiqarib qo'yish mumkin.
 - **Bir nechta buyurtma guruhi**: asosiy guruhdan tashqari yana bir nechta (ko'pi bilan 5 ta) qo'shimcha guruhga bir vaqtda buyurtma yuborish mumkin.
+- **Yangi a'zo bildirishnomasi**: kuzatilayotgan guruhga yangi odam qo'shilsa, uning ismi, guruh nomi va profiliga bosiladigan havola barcha buyurtma guruhlariga yuboriladi.
 - **Ko'plab kalit so'z import/export**: kalit so'zlarni vergul, alohida qatorlar yoki `.txt` fayl orqali bittada ko'plab qo'shish, va mavjud ro'yxatni nusxalash uchun eksport qilish mumkin.
 - **Oldindan bloklash**: hali buyurtma yubormagan foydalanuvchini ham Telegram ID yoki username orqali oldindan bloklab qo'yish mumkin.
 - **Flood-himoya**: bir foydalanuvchidan daqiqasiga 20 tadan ortiq buyurtma o'tsa, qolganlari o'tkazib yuboriladi (spam va flood-limitning oldini olish uchun).
@@ -79,6 +80,7 @@ journalctl -u aluser -f          # loglarni jonli kuzatish
 3. "➕ Kalit so'z qo'shish" tugmasi (yoki `/addkeyword taksi`) orqali kalit so'zlarni qo'shadi.
 4. Ixtiyoriy: "🗂 Kuzatiladigan guruhlar" orqali qaysi guruhlar kuzatilishini tanlaydi.
 5. Shundan keyin akkaunt a'zo bo'lgan guruhlarda kalit so'zga mos xabar chiqsa, bot avtomatik ravishda ism, username, telefon (topilsa), xabar havolasi, mijoz profiliga tezkor havola va xabar matnini buyurtmalar guruhiga yuboradi.
+6. Kuzatilayotgan guruhga yangi odam kirsa yoki qo'shilsa, bot uning ismi, guruh nomi va profil havolasini asosiy hamda qo'shimcha buyurtma guruhlariga yuboradi. Bir guruhni bir nechta ulangan akkaunt kuzatsa ham bildirishnoma takrorlanmaydi.
 
 ## Obuna va admin panel
 
