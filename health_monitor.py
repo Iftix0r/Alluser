@@ -1,15 +1,19 @@
 import asyncio
+import html
 import logging
+import math
 import os
 import shutil
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from telethon.errors import RPCError
 
 from config import (
     ADMIN_IDS,
+    CURRENT_VPS_PLAN,
     HEALTH_CHECK_INTERVAL_SECONDS,
     HEALTH_CONSECUTIVE_CHECKS,
     HEALTH_CPU_THRESHOLD_PERCENT,
@@ -23,6 +27,27 @@ logger = logging.getLogger(__name__)
 _latest_health = None
 _cpu_lock = threading.Lock()
 _previous_cpu_times = None
+_previous_process_times = {}
+_last_cpu_total_delta = 0
+
+VPS_PLANS = (
+    ("VPS 1", 1, 1, 60_000),
+    ("VPS 2", 2, 2, 110_000),
+    ("VPS 3", 2, 4, 200_000),
+    ("VPS 4", 4, 8, 380_000),
+    ("VPS 5", 6, 16, 760_000),
+    ("VPS 6", 8, 32, 1_520_000),
+    ("VPS 7", 12, 48, 2_280_000),
+    ("VPS 8", 16, 64, 3_040_000),
+)
+
+
+@dataclass(frozen=True)
+class ProcessUsage:
+    pid: int
+    name: str
+    cpu_percent: float
+    memory_mb: float
 
 
 @dataclass(frozen=True)
@@ -34,6 +59,7 @@ class ServerHealth:
     memory_percent: float
     disk_percent: float
     event_loop_lag: float = 0.0
+    top_processes: tuple[ProcessUsage, ...] = ()
 
 
 def _memory_percent() -> float:
@@ -53,7 +79,7 @@ def _memory_percent() -> float:
 
 def _cpu_percent() -> float:
     """Ikki o'lchov oralig'idagi real CPU bandligini /proc/stat orqali hisoblaydi."""
-    global _previous_cpu_times
+    global _last_cpu_total_delta, _previous_cpu_times
     try:
         with open("/proc/stat", encoding="utf-8") as proc_stat:
             values = [int(value) for value in proc_stat.readline().split()[1:]]
@@ -73,9 +99,39 @@ def _cpu_percent() -> float:
         return _cpu_percent()
     total_delta = total - previous[0]
     idle_delta = idle - previous[1]
+    _last_cpu_total_delta = max(total_delta, 0)
     if total_delta <= 0:
         return 0.0
     return max(0.0, min(100.0, (total_delta - idle_delta) / total_delta * 100))
+
+
+def _top_processes(limit: int = 5) -> tuple[ProcessUsage, ...]:
+    """Oxirgi ikki health-check oralig'ida eng ko'p CPU ishlatgan jarayonlar."""
+    global _previous_process_times
+    current_times = {}
+    process_data = []
+    page_size = os.sysconf("SC_PAGE_SIZE")
+    for stat_path in Path("/proc").glob("[0-9]*/stat"):
+        try:
+            pid = int(stat_path.parent.name)
+            raw = stat_path.read_text(encoding="utf-8")
+            close_paren = raw.rfind(")")
+            name = raw[raw.find("(") + 1 : close_paren]
+            fields = raw[close_paren + 2 :].split()
+            process_ticks = int(fields[11]) + int(fields[12])
+            current_times[pid] = process_ticks
+            previous_ticks = _previous_process_times.get(pid)
+            if previous_ticks is None or _last_cpu_total_delta <= 0:
+                continue
+            cpu_percent = max(0.0, (process_ticks - previous_ticks) / _last_cpu_total_delta * 100)
+            rss_pages = int((stat_path.parent / "statm").read_text().split()[1])
+            memory_mb = rss_pages * page_size / 1024 / 1024
+            process_data.append(ProcessUsage(pid, name, cpu_percent, memory_mb))
+        except (OSError, ValueError, IndexError):
+            continue
+    _previous_process_times = current_times
+    process_data.sort(key=lambda item: (item.cpu_percent, item.memory_mb), reverse=True)
+    return tuple(process_data[:limit])
 
 
 def collect_server_health(event_loop_lag: float = 0.0) -> ServerHealth:
@@ -85,14 +141,16 @@ def collect_server_health(event_loop_lag: float = 0.0) -> ServerHealth:
     except OSError:
         one_minute_load = 0.0
     disk = shutil.disk_usage(".")
+    cpu_percent = _cpu_percent()
     return ServerHealth(
-        cpu_percent=_cpu_percent(),
+        cpu_percent=cpu_percent,
         load_average=one_minute_load,
         cpu_count=cpu_count,
         load_percent=one_minute_load / cpu_count * 100,
         memory_percent=_memory_percent(),
         disk_percent=disk.used / disk.total * 100 if disk.total else 0.0,
         event_loop_lag=max(event_loop_lag, 0.0),
+        top_processes=_top_processes(),
     )
 
 
@@ -133,6 +191,36 @@ def format_health(health: ServerHealth) -> str:
         advice = "\n\n💡 RAM yetishmayapti; xotira hajmini oshirish tavsiya qilinadi."
     elif health.disk_percent >= HEALTH_DISK_THRESHOLD_PERCENT:
         advice = "\n\n💡 Diskni tozalash yoki hajmini oshirish kerak."
+    current_plan = next((plan for plan in VPS_PLANS if plan[0] == CURRENT_VPS_PLAN), None)
+    plan_text = ""
+    if current_plan:
+        plan_text = (
+            f"\n\n📦 Joriy tarif: {current_plan[0]} — {current_plan[1]} yadro, "
+            f"{current_plan[2]} GB RAM, {current_plan[3]:,} so'm".replace(",", " ")
+        )
+    if health.cpu_percent >= HEALTH_CPU_THRESHOLD_PERCENT and health.load_percent >= HEALTH_LOAD_THRESHOLD_PERCENT:
+        target_cores = max(health.cpu_count + 1, math.ceil(health.load_average / 0.7))
+        recommended = next(
+            (plan for plan in VPS_PLANS if plan[1] >= target_cores),
+            VPS_PLANS[-1],
+        )
+        plan_text += (
+            f"\n🚀 Tavsiya: {recommended[0]} — {recommended[1]} yadro, "
+            f"{recommended[2]} GB RAM, {recommended[3]:,} so'm/oy".replace(",", " ")
+        )
+
+    processes_text = ""
+    if health.top_processes:
+        process_lines = ["\n\n🔎 <b>Eng ko'p resurs ishlatayotgan jarayonlar:</b>"]
+        for process in health.top_processes:
+            process_lines.append(
+                f"• {html.escape(process.name)} (PID {process.pid}) — CPU {process.cpu_percent:.1f}%, "
+                f"RAM {process.memory_mb:.0f} MB"
+            )
+        processes_text = "\n".join(process_lines)
+    else:
+        processes_text = "\n\n🔎 Jarayonlar tahlili uchun keyingi monitor o'lchovi kutilmoqda."
+
     return (
         f"🖥 <b>Server holati</b>\n\n"
         f"{status}\n"
@@ -143,6 +231,8 @@ def format_health(health: ServerHealth) -> str:
         f"💾 Disk: {health.disk_percent:.1f}%\n"
         f"⏱ Bot kechikishi: {health.event_loop_lag:.1f} soniya"
         f"{advice}"
+        f"{plan_text}"
+        f"{processes_text}"
     )
 
 
@@ -192,7 +282,7 @@ async def health_monitor_loop(bot_client) -> None:
                     bot_client,
                     "🚨 <b>Server kuchi yetishmayapti!</b>\n\n"
                     f"{details}\n\n"
-                    "Server tarifini oshirish yoki yuklamani tekshirish tavsiya qilinadi.",
+                    + format_health(health),
                 )
 
             if recovered:
