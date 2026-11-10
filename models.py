@@ -36,6 +36,7 @@ class User(Base):
     renewal_notice_sent_at = Column(DateTime, nullable=True)
     rich_order_format = Column(Boolean, default=False, nullable=False)
     whitelist_only_groups = Column(Boolean, default=False, nullable=False)
+    new_member_notifications_enabled = Column(Boolean, default=True, nullable=False)
 
     keywords = relationship("Keyword", back_populates="user", cascade="all, delete-orphan")
     driver_keywords = relationship("DriverKeyword", back_populates="user", cascade="all, delete-orphan")

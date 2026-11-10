@@ -639,7 +639,12 @@ class UserbotManager:
             return
 
         current = await asyncio.to_thread(db_utils.find_user_by_id, user_db_id)
-        if not current or not current.is_active or not current.order_group_id:
+        if (
+            not current
+            or not current.is_active
+            or not current.order_group_id
+            or not current.new_member_notifications_enabled
+        ):
             return
         if not db_utils.is_subscription_active(current):
             return

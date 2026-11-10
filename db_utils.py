@@ -404,6 +404,22 @@ def toggle_whitelist_only_groups(tg_user_id: int, value: bool) -> None:
         db.close()
 
 
+def set_new_member_notifications(user_id: int, enabled: bool) -> User | None:
+    """Admin paneldan yangi a'zo bildirishnomasini yoqadi/o'chiradi."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            return None
+        user.new_member_notifications_enabled = enabled
+        db.commit()
+        db.refresh(user)
+        db.expunge(user)
+        return user
+    finally:
+        db.close()
+
+
 def add_allowed_group(user_id: int, chat_id: int, username: str | None, title: str | None) -> bool:
     """Ruxsat berilgan guruhlar ro'yxatiga qo'shadi. True = yangi qo'shildi."""
     db = SessionLocal()

@@ -65,6 +65,7 @@ def _user_detail_text(user) -> str:
         f"📱 Telefon: {user.phone or '-'}\n"
         f"📦 Buyurtma guruh: {user.order_group_id or 'ulanmagan'} (+{extra_groups} qo'shimcha)\n"
         f"👥 Qo'shimcha akkauntlar: {extra_accounts}\n"
+        f"🆕 Yangi a'zo xabari: {'yoqilgan' if user.new_member_notifications_enabled else 'o‘chirilgan'}\n"
         f"✅ Faol: {'ha' if user.is_active else 'yoq'}\n"
         f"💳 Obuna: {db_utils.format_subscription_status(user)}\n"
         f"📦 Buyurtmalar: bugun {orders_today} ta, jami {orders_total} ta\n"
@@ -86,6 +87,15 @@ def _user_detail_buttons(user) -> list:
             Button.inline("🛑 Obunani bekor qilish", f"admin_revoke:{user.id}".encode(), style="danger"),
         ],
         [Button.inline(active_label, f"admin_toggle:{user.id}".encode(), style=active_style)],
+        [
+            Button.inline(
+                "🔕 Yangi a'zo xabarini o'chirish"
+                if user.new_member_notifications_enabled
+                else "🔔 Yangi a'zo xabarini yoqish",
+                f"admin_new_member_toggle:{user.id}".encode(),
+                style="danger" if user.new_member_notifications_enabled else "success",
+            )
+        ],
         [Button.inline("✉️ Xabar yuborish", f"admin_msg:{user.id}".encode(), style="primary")],
         [Button.inline("🔌 Sessiyani tozalash", f"admin_clear_session:{user.id}".encode(), style="danger")],
         [Button.inline("🗑 Foydalanuvchini o'chirish", f"admin_delete_confirm:{user.id}".encode(), style="danger")],
@@ -129,6 +139,7 @@ async def _dispatch_admin_callback(event, manager) -> None:
         connected = [u for u in users if u.session_string]
         active = sum(1 for u in connected if u.is_active and db_utils.is_subscription_active(u))
         expired = sum(1 for u in connected if not db_utils.is_subscription_active(u))
+        new_member_enabled = sum(1 for u in connected if u.new_member_notifications_enabled)
         order_stats = db_utils.get_global_order_stats()
         ad_stats = db_utils.get_global_ad_stats()
         top_users = db_utils.get_top_order_users(limit=5, since=datetime.utcnow() - timedelta(days=7))
@@ -138,6 +149,7 @@ async def _dispatch_admin_callback(event, manager) -> None:
             f"Akkaunt ulaganlar: {len(connected)}",
             f"Hozir faol (obunasi bor): {active}",
             f"Obunasi tugaganlar: {expired}",
+            f"Yangi a'zo xabari yoqilgan: {new_member_enabled}",
             "",
             f"📦 Buyurtmalar — bugun: {order_stats['today']}, "
             f"7 kunda: {order_stats['week']}, jami: {order_stats['total']}",
@@ -405,4 +417,16 @@ async def _dispatch_admin_callback(event, manager) -> None:
         await manager.notify(user.tg_user_id, note)
         user = db_utils.find_user_by_id(user_id)
         await event.answer("Holat yangilandi.")
+        await event.edit(_user_detail_text(user), buttons=_user_detail_buttons(user))
+
+    elif data.startswith(b"admin_new_member_toggle:"):
+        user_id = int(data[len(b"admin_new_member_toggle:") :])
+        user = db_utils.find_user_by_id(user_id)
+        if not user:
+            await event.answer("Topilmadi.", alert=True)
+            return
+        new_value = not user.new_member_notifications_enabled
+        user = db_utils.set_new_member_notifications(user_id, new_value)
+        status = "yoqildi" if new_value else "o'chirildi"
+        await event.answer(f"Yangi a'zo xabari {status}.")
         await event.edit(_user_detail_text(user), buttons=_user_detail_buttons(user))

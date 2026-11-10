@@ -22,6 +22,10 @@ USERS_TABLE_MIGRATIONS = [
     ("renewal_notice_sent_at", "ALTER TABLE users ADD COLUMN renewal_notice_sent_at DATETIME"),
     ("rich_order_format", "ALTER TABLE users ADD COLUMN rich_order_format BOOLEAN DEFAULT 0 NOT NULL"),
     ("whitelist_only_groups", "ALTER TABLE users ADD COLUMN whitelist_only_groups BOOLEAN DEFAULT 0 NOT NULL"),
+    (
+        "new_member_notifications_enabled",
+        "ALTER TABLE users ADD COLUMN new_member_notifications_enabled BOOLEAN DEFAULT 1 NOT NULL",
+    ),
 ]
 
 # customer_greeting_enabled ustuni bir necha marta standart qiymati o'zgargan:
