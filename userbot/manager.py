@@ -972,6 +972,7 @@ class UserbotManager:
         order_text = "\n".join(lines)
 
         rows = []
+        rows.append([Button.url("👤 Mijoz profiliga kirish", _profile_url, style="primary")])
         if chat_username:
             rows.append(
                 [Button.url("🔗 Manba xabari", f"https://t.me/{chat_username}/{message.id}", style="primary")]
@@ -1063,10 +1064,17 @@ class UserbotManager:
             )
         else:
             fields = []
+            sender_username = getattr(sender, "username", None)
+            profile_url = (
+                f"https://t.me/{sender_username}" if sender_username else f"tg://user?id={sender.id}"
+            )
             if name:
-                fields.append(f"👤 {html.escape(name)}")
+                fields.append(f"👤 <a href=\"{profile_url}\">{html.escape(name)}</a>")
+            else:
+                fields.append(f"👤 <a href=\"{profile_url}\">Mijoz profili</a>")
+            fields.append(f"🆔 ID: <code>{sender.id}</code>")
             if username:
-                fields.append(f"🔗 {html.escape(username)}")
+                fields.append(f"🔗 <a href=\"{profile_url}\">{html.escape(username)}</a>")
             if phone:
                 fields.append(f"📞 {html.escape(phone)}")
             if chat_title and not chat_username:
@@ -1081,10 +1089,7 @@ class UserbotManager:
             link_row = []
             if chat_username:
                 link_row.append(Button.url("🔗 Xabarga o'tish", f"https://t.me/{chat_username}/{message.id}", style="primary"))
-            _sender_uname = getattr(sender, "username", None)
-            _profil_url = f"https://t.me/{_sender_uname}" if _sender_uname else f"tg://user?id={sender.id}"
-            _profil_label = f"👤 {name}"[:40] if name else "👤 Profil"
-            link_row.append(Button.url(_profil_label, _profil_url, style="primary"))
+            link_row.append(Button.url("👤 Mijoz profiliga kirish", profile_url, style="primary"))
             buttons = [
                 link_row,
                 self._build_action_button(current.id, sender, name, message.chat_id, chat_title, chat_username),
