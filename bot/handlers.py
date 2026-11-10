@@ -253,6 +253,12 @@ def main_menu(user) -> list:
     unmatched_label = (
         "🧭 Aniqlanmagan: yo'lovchi ✅" if user.assume_passenger_if_unmatched else "🧭 Aniqlanmagan: yo'lovchi ❌"
     )
+    new_member_style = "success" if user.new_member_notifications_enabled else "danger"
+    new_member_label = (
+        "🆕 Yangi a'zo xabari ✅"
+        if user.new_member_notifications_enabled
+        else "🆕 Yangi a'zo xabari ❌"
+    )
     return [
         [
             Button.inline("🔑 Kalit so'zlar", b"kw_menu", style="primary"),
@@ -264,6 +270,7 @@ def main_menu(user) -> list:
         ],
         [Button.inline("📊 Holat", b"status", style="primary"), Button.inline(active_label, b"toggle_active", style=active_style)],
         [Button.inline(unmatched_label, b"toggle_unmatched_passenger", style=unmatched_style)],
+        [Button.inline(new_member_label, b"toggle_new_member_notifications", style=new_member_style)],
         [
             Button.inline("🚫 Bloklanganlar", b"blocked_menu", style="primary"),
             Button.inline("📢 Reklama", b"ad_menu", style="primary"),
@@ -363,6 +370,7 @@ def format_status(user) -> str:
             f"🗂 Qo'shimcha buyurtma guruhlari: {len(extra_groups)} ta",
             f"✅ Faol: {'ha' if user.is_active else 'yoq'}",
             f"🧭 Aniqlanmagan xabarlarni yo'lovchi deb qabul qilish: {'ha' if user.assume_passenger_if_unmatched else 'yoq'}",
+            f"🆕 Yangi a'zo bildirishnomasi: {'yoqilgan' if user.new_member_notifications_enabled else 'o‘chirilgan'}",
             f"💳 Obuna: {db_utils.format_subscription_status(user)}",
             f"🔑 Kalit so'zlar ({len(kws)}): {', '.join(kws) if kws else '-'}",
             f"🚖 Haydovchi so'zlari ({len(dkws)}): {', '.join(dkws) if dkws else '-'}",
@@ -1220,6 +1228,12 @@ async def _dispatch_callback(event, data, tg_user_id, user, bot_client, manager,
         db_utils.toggle_assume_passenger(tg_user_id, new_value)
         user = db_utils.get_user(tg_user_id)
         await event.answer("Sozlama yangilandi.")
+        await event.edit("Bosh menyu:", buttons=main_menu(user))
+
+    elif data == b"toggle_new_member_notifications":
+        new_value = db_utils.toggle_new_member_notifications(tg_user_id)
+        user = db_utils.get_user(tg_user_id)
+        await event.answer("Yangi a'zo xabari yoqildi." if new_value else "Yangi a'zo xabari o'chirildi.")
         await event.edit("Bosh menyu:", buttons=main_menu(user))
 
     elif data == b"list_kw":

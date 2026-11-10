@@ -420,6 +420,20 @@ def set_new_member_notifications(user_id: int, enabled: bool) -> User | None:
         db.close()
 
 
+def toggle_new_member_notifications(tg_user_id: int) -> bool | None:
+    """Foydalanuvchi menyusidan yangi a'zo bildirishnomasini almashtiradi."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(tg_user_id=tg_user_id).first()
+        if not user:
+            return None
+        user.new_member_notifications_enabled = not user.new_member_notifications_enabled
+        db.commit()
+        return user.new_member_notifications_enabled
+    finally:
+        db.close()
+
+
 def add_allowed_group(user_id: int, chat_id: int, username: str | None, title: str | None) -> bool:
     """Ruxsat berilgan guruhlar ro'yxatiga qo'shadi. True = yangi qo'shildi."""
     db = SessionLocal()

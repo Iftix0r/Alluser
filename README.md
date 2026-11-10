@@ -81,7 +81,7 @@ journalctl -u aluser -f          # loglarni jonli kuzatish
 3. "➕ Kalit so'z qo'shish" tugmasi (yoki `/addkeyword taksi`) orqali kalit so'zlarni qo'shadi.
 4. Ixtiyoriy: "🗂 Kuzatiladigan guruhlar" orqali qaysi guruhlar kuzatilishini tanlaydi.
 5. Shundan keyin akkaunt a'zo bo'lgan guruhlarda kalit so'zga mos xabar chiqsa, bot avtomatik ravishda ism, username, telefon (topilsa), xabar havolasi, mijoz profiliga tezkor havola va xabar matnini buyurtmalar guruhiga yuboradi.
-6. Kuzatilayotgan guruhga yangi odam kirsa yoki qo'shilsa, bot uning ismi, guruh nomi va profil havolasini asosiy hamda qo'shimcha buyurtma guruhlariga yuboradi. Bir guruhni bir nechta ulangan akkaunt kuzatsa ham bildirishnoma takrorlanmaydi.
+6. Kuzatilayotgan guruhga yangi odam kirsa yoki qo'shilsa, bot uning ismi, guruh nomi va profil havolasini asosiy hamda qo'shimcha buyurtma guruhlariga yuboradi. Bir guruhni bir nechta ulangan akkaunt kuzatsa ham bildirishnoma takrorlanmaydi. Bu imkoniyatni foydalanuvchi bosh menyudan, admin esa admin paneldan yoqib/o'chira oladi.
 
 ## Obuna va admin panel
 
