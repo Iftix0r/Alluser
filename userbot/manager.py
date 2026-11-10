@@ -627,9 +627,9 @@ class UserbotManager:
         if not db_utils.is_subscription_active(current):
             return
 
-        excluded = await asyncio.to_thread(db_utils.get_excluded_group_ids, user_db_id)
-        keywords = await asyncio.to_thread(db_utils.list_keywords, tg_user_id)
-        driver_keywords = await asyncio.to_thread(db_utils.list_driver_keywords, tg_user_id)
+        excluded, keywords, driver_keywords = await asyncio.to_thread(
+            db_utils.get_monitoring_filters, user_db_id
+        )
 
         await self._process_message(event, current, keywords, driver_keywords, excluded)
 
@@ -761,12 +761,11 @@ class UserbotManager:
         if not db_utils.is_subscription_active(user):
             return
 
-        keywords = await asyncio.to_thread(db_utils.list_keywords, user.tg_user_id)
+        excluded, keywords, driver_keywords = await asyncio.to_thread(
+            db_utils.get_monitoring_filters, user.id
+        )
         if not keywords:
             return
-
-        driver_keywords = await asyncio.to_thread(db_utils.list_driver_keywords, user.tg_user_id)
-        excluded = await asyncio.to_thread(db_utils.get_excluded_group_ids, user.id)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=CATCHUP_LOOKBACK_HOURS)
 
         candidates = []
@@ -994,11 +993,6 @@ class UserbotManager:
         if message.chat_id in excluded:
             return False
 
-        if current.whitelist_only_groups:
-            allowed = await asyncio.to_thread(db_utils.get_allowed_group_ids, current.id)
-            if message.chat_id not in allowed:
-                return False
-
         if message.sticker:
             return False
 
@@ -1020,16 +1014,25 @@ class UserbotManager:
                 return False
             matched = "aniqlanmagan (yo'lovchi deb qabul qilindi)"
 
+        # Faqat buyurtmaga o'xshagan xabar uchun guruh ro'yxatini bazadan tekshiramiz.
+        # Shunda oddiy guruh suhbatlari ortiqcha DB so'rovi qilmaydi.
+        if current.whitelist_only_groups:
+            allowed = await asyncio.to_thread(db_utils.get_allowed_group_ids, current.id)
+            if message.chat_id not in allowed:
+                return False
+
         sender = await message.get_sender()
         if not sender or getattr(sender, "bot", False):
             return False
 
-        blocked = await asyncio.to_thread(db_utils.is_sender_blocked, current.id, sender.id)
+        blocked, elapsed = await asyncio.gather(
+            asyncio.to_thread(db_utils.is_sender_blocked, current.id, sender.id),
+            asyncio.to_thread(db_utils.seconds_since_last_order, current.id, sender.id),
+        )
         if blocked:
             return False
 
         # Bitta odamdan bir vaqtning o'zida bir nechta zakaz kelib tushmasin.
-        elapsed = await asyncio.to_thread(db_utils.seconds_since_last_order, current.id, sender.id)
         if elapsed is not None and elapsed < SENDER_COOLDOWN_SECONDS:
             logger.info(
                 "Cooldown: user=%s sender=%s %.0fs oldin zakaz kelgan (kamida %ss kerak) - o'tkazib yuborildi",
@@ -1047,12 +1050,14 @@ class UserbotManager:
         username = f"@{sender.username}" if getattr(sender, "username", None) else None
         phone = extract_phone(text)
 
-        chat = await message.get_chat()
+        chat, extra_group_ids = await asyncio.gather(
+            message.get_chat(),
+            asyncio.to_thread(db_utils.get_extra_order_group_ids, current.id),
+        )
         chat_title = getattr(chat, "title", None)
         chat_username = getattr(chat, "username", None)
 
-        extra_group_ids = await asyncio.to_thread(db_utils.get_extra_order_group_ids, current.id)
-        destination_ids = [current.order_group_id, *extra_group_ids]
+        destination_ids = list(dict.fromkeys([current.order_group_id, *extra_group_ids]))
 
         order_card_id = None
         if current.rich_order_format:
@@ -1095,24 +1100,18 @@ class UserbotManager:
                 self._build_action_button(current.id, sender, name, message.chat_id, chat_title, chat_username),
             ]
 
-        sent_to_main = False
-        for idx, dest_chat_id in enumerate(destination_ids):
+        async def send_order(dest_chat_id):
             try:
                 sent = await self.bot_client.send_message(
                     dest_chat_id, order_text, buttons=buttons, link_preview=False, parse_mode="html"
                 )
-                if idx == 0:
-                    sent_to_main = True
-                if order_card_id is not None:
-                    await asyncio.to_thread(
-                        db_utils.add_order_card_message, order_card_id, dest_chat_id, sent.id
-                    )
+                return sent
             except (RPCError, ValueError):
                 # ValueError - Telethon entity keshida topilmagan chat uchun (masalan bot
                 # o'sha guruhdan chiqarib yuborilgan yoki hech qachon xabar ko'rmagan bo'lsa).
                 # Buni ham RPCError kabi "shu manzilga yuborilmadi" deb hisoblab, davom etamiz -
                 # aks holda butun buyurtma qayta ishlash to'xtab qoladi (mention, statistika va h.k.).
-                if idx == 0:
+                if dest_chat_id == current.order_group_id:
                     logger.exception("Buyurtma guruhga yuborilmadi: user=%s", current.tg_user_id)
                     await self.notify(
                         current.tg_user_id,
@@ -1124,9 +1123,23 @@ class UserbotManager:
                         current.tg_user_id,
                         dest_chat_id,
                     )
+                return None
+
+        send_results = await asyncio.gather(*(send_order(chat_id) for chat_id in destination_ids))
+        sent_to_main = send_results[0] is not None
 
         if not sent_to_main:
             return False
+
+        if order_card_id is not None:
+            delivered_messages = [
+                (chat_id, sent.id)
+                for chat_id, sent in zip(destination_ids, send_results)
+                if sent is not None
+            ]
+            await asyncio.to_thread(
+                db_utils.add_order_card_messages, order_card_id, delivered_messages
+            )
 
         # Bot mijozni to'g'ridan-to'g'ri mention qila olmaydi (u bilan aloqada bo'lmagani
         # uchun access_hash yo'q). Akkaunt esa mijoz turgan guruhda a'zo bo'lgani uchun
@@ -1139,7 +1152,7 @@ class UserbotManager:
                 input_user = utils.get_input_user(sender)
                 offset = len(add_surrogate(prefix))
                 length = len(add_surrogate(name))
-                for dest_chat_id in destination_ids:
+                async def send_mention(dest_chat_id):
                     try:
                         await mention_client.send_message(
                             dest_chat_id,
@@ -1152,11 +1165,11 @@ class UserbotManager:
                         logger.warning(
                             "Mijoz mention xabari yuborilmadi: user=%s, chat=%s", current.tg_user_id, dest_chat_id
                         )
+                await asyncio.gather(*(send_mention(chat_id) for chat_id in destination_ids))
         except (RPCError, ValueError):
             logger.warning("Mijoz mention xabari yuborilmadi: user=%s", current.tg_user_id)
 
-        await asyncio.to_thread(db_utils.log_order, current.id)
-        await asyncio.to_thread(db_utils.mark_sender_order_sent, current.id, sender.id)
+        await asyncio.to_thread(db_utils.record_delivered_order, current.id, sender.id)
 
         await self._maybe_send_customer_greeting(current, sender, text)
 

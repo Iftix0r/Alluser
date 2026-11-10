@@ -516,6 +516,22 @@ def get_excluded_group_ids(user_id: int) -> set[int]:
         db.close()
 
 
+def get_monitoring_filters(user_id: int) -> tuple[set[int], list[str], list[str]]:
+    """Xabar filtrlari uchun kerakli uch ro'yxatni bitta DB sessiyasida oladi."""
+    db = SessionLocal()
+    try:
+        excluded = {
+            row[0] for row in db.query(ExcludedGroup.chat_id).filter_by(user_id=user_id).all()
+        }
+        keywords = [row[0] for row in db.query(Keyword.word).filter_by(user_id=user_id).all()]
+        driver_keywords = [
+            row[0] for row in db.query(DriverKeyword.word).filter_by(user_id=user_id).all()
+        ]
+        return excluded, keywords, driver_keywords
+    finally:
+        db.close()
+
+
 def exclude_group(user_id: int, chat_id: int) -> bool:
     """Guruhni istisno (bloklangan) ro'yxatiga qo'shadi - allaqachon bo'lsa qayta qo'shmaydi.
     True = yangi bloklandi, False = allaqachon bloklangan edi."""
@@ -568,6 +584,26 @@ def mark_sender_order_sent(user_id: int, sender_id: int) -> None:
             row.last_order_at = datetime.utcnow()
         else:
             db.add(SenderCooldown(user_id=user_id, sender_id=sender_id, last_order_at=datetime.utcnow()))
+        db.commit()
+    finally:
+        db.close()
+
+
+def record_delivered_order(user_id: int, sender_id: int) -> None:
+    """Buyurtma statistikasi va sender cooldown'ini bitta tranzaksiyada yozadi.
+
+    Alohida ikkita sessiya/commit o'rniga bitta commit ishlatilishi ayniqsa SQLite'da
+    tezroq va parallel yozuvlarning database-lock xavfini kamaytiradi.
+    """
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        row = db.query(SenderCooldown).filter_by(user_id=user_id, sender_id=sender_id).first()
+        if row:
+            row.last_order_at = now
+        else:
+            db.add(SenderCooldown(user_id=user_id, sender_id=sender_id, last_order_at=now))
+        db.add(OrderLog(user_id=user_id, created_at=now))
         db.commit()
     finally:
         db.close()
@@ -1133,6 +1169,21 @@ def add_order_card_message(order_card_id: int, chat_id: int, message_id: int) ->
     db = SessionLocal()
     try:
         db.add(OrderCardMessage(order_card_id=order_card_id, chat_id=chat_id, message_id=message_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def add_order_card_messages(order_card_id: int, messages: list[tuple[int, int]]) -> None:
+    """Bir nechta buyurtma karta nusxasini bitta tranzaksiyada saqlaydi."""
+    if not messages:
+        return
+    db = SessionLocal()
+    try:
+        db.add_all(
+            OrderCardMessage(order_card_id=order_card_id, chat_id=chat_id, message_id=message_id)
+            for chat_id, message_id in messages
+        )
         db.commit()
     finally:
         db.close()
